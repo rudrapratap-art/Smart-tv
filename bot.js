@@ -35,6 +35,7 @@ const mainKeyboard = {
 const secondKeyboard = {
   keyboard: [
     [{ text: "💾 Backup" }, { text: "♻️ Restore" }],
+    [{ text: "📝 Start Quiz" }, { text: "⏹ Stop Quiz" }],
     [{ text: "📄 CSV Help" }, { text: "📥 CSV Template" }],
     [{ text: "⬅️ Main menu" }]
   ],
@@ -402,6 +403,41 @@ async function handleUpdate(update, io) {
     const callback = update.callback_query;
     const chatId = callback.message?.chat?.id;
     const senderId = String(callback.from?.id || "");
+    if (String(callback.data || "").startsWith("qz:")) {
+      const parts = callback.data.split(":");
+      const quizId = parts[1];
+      const selected = Number(parts[2]);
+      if (!quizId || !Number.isInteger(selected) || selected < 0 || selected > 3) {
+        await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "Invalid option", show_alert: true });
+        return;
+      }
+      try {
+        const activeQuiz = await db.getActiveTelegramQuiz(chatId);
+        if (!activeQuiz || activeQuiz.id !== quizId) {
+          await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "यह Quiz बंद हो चुका है।", show_alert: true });
+          return;
+        }
+        const user = callback.from || {};
+        const displayName = [user.first_name, user.last_name].filter(Boolean).join(" ") || user.username || "Student";
+        const inserted = await db.addTelegramQuizResponse({
+          quiz_id: quizId, user_id: senderId, display_name: displayName,
+          selected_option: selected, is_correct: selected === Number(activeQuiz.correct_answer)
+        });
+        if (!inserted) {
+          await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "आपका उत्तर पहले ही दर्ज हो चुका है।", show_alert: true });
+          return;
+        }
+        await telegram("answerCallbackQuery", {
+          callback_query_id: callback.id,
+          text: selected === Number(activeQuiz.correct_answer) ? "✅ सही उत्तर दर्ज हुआ!" : "उत्तर दर्ज हुआ।",
+          show_alert: false
+        });
+      } catch (error) {
+        console.error("Quiz response:", error.message);
+        await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "उत्तर सेव नहीं हुआ। फिर कोशिश करें।", show_alert: true });
+      }
+      return;
+    }
     if (!ADMIN_ID || senderId !== ADMIN_ID) {
       await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "Unauthorized", show_alert: true });
       return;
@@ -475,6 +511,8 @@ async function handleUpdate(update, io) {
       "👁 Show Answer": "/answer",
       "🙈 Hide Answer": "/hide",
       "💾 Backup": "/backup",
+      "📝 Start Quiz": "/quiz",
+      "⏹ Stop Quiz": "/quizstop",
       "♻️ Restore": "/restore",
       "📄 CSV Help": "/csv",
       "📥 CSV Template": "/csvtemplate",
@@ -547,6 +585,65 @@ async function handleUpdate(update, io) {
         "</b>\\nअब Next / Previous से सवाल चलाएँ।", mainKeyboard);
       return;
     }
+    if (command === "/quiz") {
+      if (!["group", "supergroup"].includes(message.chat.type)) {
+        await reply(chatId, "📝 Quiz शुरू करने के लिए Bot को अपनी Class Telegram Group में Admin बनाकर उस Group में /quiz भेजें।");
+        return;
+      }
+      if (!db.isConfigured()) throw new Error("Quiz के लिए Supabase configuration जरूरी है।");
+      const bank = await db.getQuestions();
+      const saved = await getState(room, bank);
+      const candidates = filterQuestionBank(bank, saved.filter || {});
+      const q = candidates[saved.index] || candidates[0];
+      if (!q) throw new Error("पहले 🎓 Select Questions से Chapter चुनें या Question Bank में सवाल जोड़ें।");
+      const quizId = "qz_" + Date.now() + "_" + Math.floor(Math.random() * 1000000);
+      const questionText = q.hi || q.en;
+      const quiz = await db.startTelegramQuiz({
+        id: quizId, room, chat_id: String(chatId), message_id: null,
+        question_id: String(q.id), question_text: questionText,
+        options: q.opts, correct_answer: Number(q.answer), active: true
+      });
+      const keyboard = q.opts.map((option, index) => [{
+        text: String.fromCharCode(65 + index) + ". " + String(option).slice(0, 55),
+        callback_data: "qz:" + quiz.id + ":" + index
+      }]);
+      await telegram("sendMessage", {
+        chat_id: chatId,
+        text: "📝 <b>SMART CLASSROOM LIVE QUIZ</b>\\n\\n" +
+          "🎓 " + escapeHtml(q.cls) + " • " + escapeHtml(q.subject) + "\\n" +
+          "📖 " + escapeHtml(q.chapter) + "\\n\\n" +
+          "<b>" + escapeHtml(questionText) + "</b>\\n\\n" +
+          "नीचे दिए गए विकल्पों में से एक चुनें। हर विद्यार्थी का केवल पहला उत्तर स्वीकार होगा।",
+        parse_mode: "HTML",
+        reply_markup: { inline_keyboard: keyboard }
+      });
+      await reply(chatId, "✅ Quiz Group में शुरू हो गया। विद्यार्थी ऊपर दिए गए विकल्प चुन सकते हैं।", secondKeyboard);
+      return;
+    }
+
+    if (command === "/quizstop") {
+      if (!["group", "supergroup"].includes(message.chat.type)) {
+        await reply(chatId, "Quiz बंद करने के लिए Class Group में /quizstop भेजें।", secondKeyboard);
+        return;
+      }
+      const activeQuiz = await db.getActiveTelegramQuiz(chatId);
+      if (!activeQuiz) {
+        await reply(chatId, "अभी कोई active Quiz नहीं है।", secondKeyboard);
+        return;
+      }
+      await db.stopTelegramQuiz(room);
+      const responses = await db.getTelegramQuizResponses(activeQuiz.id);
+      const correct = responses.filter(x => x.is_correct).length;
+      await reply(chatId,
+        "⏹ <b>Quiz बंद हो गया!</b>\\n" +
+        "कुल उत्तर: <b>" + responses.length + "</b>\\n" +
+        "सही उत्तर: <b>" + correct + "</b>\\n" +
+        "सही विकल्प: <b>" + String.fromCharCode(65 + Number(activeQuiz.correct_answer)) + "</b>",
+        secondKeyboard
+      );
+      return;
+    }
+
     if (command === "/backup") {
       await backupCommand(chatId);
       return;
@@ -689,6 +786,8 @@ async function configureWebhook() {
       { command: "csv", description: "Preview and import CSV questions" },
       { command: "csvtemplate", description: "Download sample CSV template" },
       { command: "backup", description: "Export question bank JSON and CSV" },
+      { command: "quiz", description: "Start current question quiz in class group" },
+      { command: "quizstop", description: "Stop the active class quiz" },
       { command: "restore", description: "Restore questions from JSON backup" },
       { command: "edit", description: "Edit a question" },
       { command: "delete", description: "Delete a question" }
