@@ -1,7 +1,7 @@
 const $=id=>document.getElementById(id);
 const socket=window.io?io():null;
 function loadJson(key,fallback){try{const value=JSON.parse(localStorage.getItem(key)||"null");return value??fallback}catch(err){console.warn("Invalid local data:",key,err);return fallback}}
-let room="CLASS10", index=0, showAnswer=false, timer=null, remaining=30, editing=null;
+let room="CLASS10", index=0, showAnswer=false, timer=null, remaining=30, editing=null, remoteReady=false;
 let questions=loadJson("sc_questions",null)||[
 { id:1,cls:"Class 6",subject:"Science",chapter:"प्रकाश संश्लेषण",hi:"पौधे अपना भोजन किस प्रक्रिया से बनाते हैं?",en:"By which process do plants make their food?",opts:["श्वसन / Respiration","प्रकाश संश्लेषण / Photosynthesis","वाष्पोत्सर्जन / Transpiration","पाचन / Digestion"],answer:1,explain:"हरे पौधे सूर्य के प्रकाश की सहायता से भोजन बनाते हैं।"},
 { id:2,cls:"Class 7",subject:"Science",chapter:"मानव शरीर",hi:"मानव शरीर में रक्त को पंप कौन करता है?",en:"Which organ pumps blood in the human body?",opts:["फेफड़े / Lungs","मस्तिष्क / Brain","हृदय / Heart","गुर्दे / Kidneys"],answer:2,explain:"हृदय रक्त को पूरे शरीर में पंप करता है।"},
@@ -14,12 +14,40 @@ let questions=loadJson("sc_questions",null)||[
 ];
 if(!Array.isArray(questions))questions=[];
 let selectedQuestionIds = new Set();
-function persist(){localStorage.setItem("sc_questions",JSON.stringify(questions));$("totalCount").textContent=questions.length;selectedQuestionIds=new Set([...selectedQuestionIds].filter(id=>questions.some(q=>String(q.id)===id)));renderList();renderController();broadcast();}
+function persist(){
+ localStorage.setItem("sc_questions",JSON.stringify(questions));
+ $("totalCount").textContent=questions.length;
+ selectedQuestionIds=new Set([...selectedQuestionIds].filter(id=>questions.some(q=>String(q.id)===id)));
+ renderList();renderController();broadcast();
+ const adminKey=localStorage.getItem("sc_admin_key")||"";
+ if(remoteReady&&adminKey){
+  fetch("/api/questions",{method:"PUT",headers:{"Content-Type":"application/json","X-Admin-Key":adminKey},body:JSON.stringify({questions})})
+   .then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.json()})
+   .catch(err=>{console.warn("Cloud question save failed:",err);toast("Cloud save failed — Admin Key जाँचें")});
+ }
+}
 function toast(t){let el=$("toast");el.textContent=t;el.classList.add("show");setTimeout(()=>el.classList.remove("show"),2200)}
 function current(){return questions.length?questions[Math.max(0,Math.min(index,questions.length-1))]:null}
 function state(){return {questions,index,showAnswer,room,language:$("displayLanguage")?.value||"both",progress:$("showProgress")?.checked!==false};}
 function broadcast(){if(socket)socket.emit("class-state",{room,state:state()});}
-if(socket){socket.on("connect",()=>{$("connectionStatus").textContent="Connected";socket.emit("join-room",room)});socket.on("joined",()=>broadcast());socket.on("class-state",s=>{if(!s)return;questions=s.questions||questions;index=s.index||0;showAnswer=!!s.showAnswer;renderController();renderList()});socket.on("disconnect",()=>{$("connectionStatus").textContent="Offline"})}
+if(socket){
+ socket.on("connect",()=>{$("connectionStatus").textContent="Connected";socket.emit("join-room",room)});
+ socket.on("joined",()=>{$("connectionStatus").textContent="Connected"});
+ socket.on("class-state",s=>{if(!s)return;if(Array.isArray(s.questions)){questions=s.questions;localStorage.setItem("sc_questions",JSON.stringify(questions));remoteReady=true}$("totalCount").textContent=questions.length;index=Math.max(0,Math.min(Number(s.index)||0,Math.max(0,questions.length-1)));showAnswer=!!s.showAnswer;renderController();renderList()});
+ socket.on("disconnect",()=>{$("connectionStatus").textContent="Offline"});
+}
+async function bootstrapRemote(){
+ try{
+  const response=await fetch("/api/questions",{cache:"no-store"});
+  if(response.ok){
+   const data=await response.json();
+   if(Array.isArray(data.questions)&&data.questions.length){questions=data.questions;localStorage.setItem("sc_questions",JSON.stringify(questions))}
+   remoteReady=true;
+  }
+ }catch(error){console.warn("Cloud question load unavailable:",error)}
+ $("totalCount").textContent=questions.length;renderList();renderController();
+ if(socket&&socket.connected)socket.emit("join-room",room);
+}
 function showPage(id){document.querySelectorAll(".page").forEach(p=>p.classList.toggle("active",p.id===id));document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active",b.dataset.page===id));if(id==="controller")renderController()}
 document.querySelectorAll("[data-page]").forEach(b=>b.addEventListener("click",()=>showPage(b.dataset.page)));
 function move(n){if(n>0&&$("questionOrder")?.value==="random"&&questions.length>1){let next=index;while(next===index)next=Math.floor(Math.random()*questions.length);index=next}else index=Math.max(0,Math.min(questions.length-1,index+n));showAnswer=false;renderController();broadcast();resetTimer()}
@@ -106,10 +134,16 @@ function renderTimer(){$("timerDisplay").textContent="00:"+String(remaining).pad
 $("duration").onchange=resetTimer;
 $("timerStart").onclick=()=>{if(timer)return;timer=setInterval(()=>{remaining--;renderTimer();if(remaining<=0){if($("autoReveal").checked&&!showAnswer){showAnswer=true;broadcast();remaining=5}else{move(1);return}}},1000)};
 $("timerPause").onclick=()=>{clearInterval(timer);timer=null};$("timerReset").onclick=()=>{clearInterval(timer);timer=null;resetTimer()};resetTimer();
-$("saveSettings").onclick=()=>{localStorage.setItem("sc_language",$("displayLanguage").value);localStorage.setItem("sc_order",$("questionOrder").value);broadcast();toast("Settings saved")};
-$("displayLanguage").value=localStorage.getItem("sc_language")||"both";$("questionOrder").value=localStorage.getItem("sc_order")||"normal";
+$("saveSettings").onclick=()=>{
+ localStorage.setItem("sc_language",$("displayLanguage").value);
+ localStorage.setItem("sc_order",$("questionOrder").value);
+ const adminKey=$("adminApiKey")?.value.trim()||"";
+ if(adminKey)localStorage.setItem("sc_admin_key",adminKey);else localStorage.removeItem("sc_admin_key");
+ broadcast();toast("Settings saved");
+};
+$("displayLanguage").value=localStorage.getItem("sc_language")||"both";$("questionOrder").value=localStorage.getItem("sc_order")||"normal";if($("adminApiKey"))$("adminApiKey").value=localStorage.getItem("sc_admin_key")||"";
 window.addEventListener("keydown",e=>{if(document.activeElement.matches("input,textarea,select"))return;if(e.key==="ArrowRight")move(1);if(e.key==="ArrowLeft")move(-1);if(e.key==="Enter"||e.key===" ") {showAnswer=!showAnswer;broadcast();}});
-renderList();renderController();persist();
+renderList();renderController();bootstrapRemote();
 // Upgrade v2: CSV import/export and student performance
 let scores=loadJson("sc_scores",[]);
 function saveScores(){localStorage.setItem("sc_scores",JSON.stringify(scores));renderScores()}

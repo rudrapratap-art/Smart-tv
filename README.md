@@ -1,51 +1,50 @@
 # Smart Classroom (LG webOS + Mobile Controller)
 
 ## Features
-- TV presentation screen (`/tv.html`) with large bilingual questions.
-- Mobile/desktop dashboard and question bank (`/`).
-- Remote keyboard support: Left = previous, Right = next, Enter/Space = reveal answer.
-- Auto-play timer (15/30/45/60/90 sec).
-- Add/edit/delete questions; stored in browser localStorage.
-- Socket.IO live sync between TV and controller when both use the same hosted server and room code.
+- TV presentation screen (`/tv.html`) with bilingual questions and standard remote keyboard controls.
+- Mobile/desktop dashboard, question bank, CSV import/export, timer and performance view.
+- Socket.IO live sync between TV and controller.
+- Supabase-backed permanent question bank and saved room presentation state.
+- Telegram admin bot for classroom controls and question-bank management.
 
 ## Run locally
 1. Install Node.js 18 or newer.
-2. In this folder run `npm install`
-3. Run `npm start`
-4. Open `http://localhost:3000` on your computer.
-5. For TV/mobile on the same Wi-Fi, use the computer's LAN IP, e.g. `http://192.168.1.5:3000`.
-6. On TV open `/tv.html`; on mobile open `/` then Controller. Use the same room code (default `CLASS10`).
+2. Run `npm install`.
+3. Copy `.env.example` to `.env` and fill in the environment variables.
+4. Apply `supabase/schema.sql` to the Supabase project's SQL Editor.
+5. Run `npm start` and open `http://localhost:3000`.
 
-## Hosting
-Deploy this Node.js project to a host that supports persistent WebSocket connections (for example Railway). Set start command to `npm start`. Open the hosted URL on TV and mobile.
+## Render environment variables
+Set these in Render Dashboard → your Web Service → Environment:
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY` (server only; never put this in frontend code or GitHub)
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_ADMIN_ID` (your numeric Telegram user ID)
+- `PUBLIC_BASE_URL` (Render HTTPS URL, no trailing slash)
+- `TELEGRAM_WEBHOOK_SECRET` (random secret, 32+ characters)
+- `CLASSROOM_ROOM` (optional, defaults to CLASS10)
+- `CLASSROOM_ADMIN_KEY` (optional API key for protected dashboard database writes)
 
-## LG TV notes
-Model 32LR570B6LA is listed by LG India with webOS 23 and a full web browser. The TV browser should be tested with the hosted URL. Keep the page simple and avoid heavy animations. If keyboard navigation on the included standard remote is limited, use LG ThinQ smartphone remote or the mobile Controller page.
+## Telegram commands
+- `/start` or `/help` — help
+- `/status` — room and current question
+- `/next`, `/prev` — navigate
+- `/answer`, `/hide` — reveal/hide answer
+- `/list` — list first 30 questions with IDs
+- `/add Class 8 | Science | Chapter | Hindi question | English question | A | B | C | D | Answer(A-D) | Explanation`
+- `/edit QUESTION_ID | Class 8 | Science | Chapter | Hindi question | English question | A | B | C | D | Answer(A-D) | Explanation`
+- `/delete QUESTION_ID`
 
-## Important MVP notes
-- Question data currently saves in the browser that created it. For shared editing across different devices, add a database in the next version.
-- TV and mobile live sync uses a shared room and Socket.IO.
-- The TV display tab should remain open while teaching.
+The bot is restricted to the Telegram user ID configured in `TELEGRAM_ADMIN_ID`. The webhook endpoint checks Telegram's secret-token header. The Supabase service key is used only on the Node server.
 
+## Database
+Apply `supabase/schema.sql` once in Supabase SQL Editor. RLS is enabled and browser roles have no table privileges; only the backend service role can access the tables.
 
-## Version 2.0 upgrade
-- CSV import/export for question bank.
-- Chapter filter.
-- Performance dashboard with student-wise correct/incorrect counts.
-- Teacher can record a student's answer using the Controller page.
-- Random question order is enabled when selected in Settings.
-- CSV header format: `class,subject,chapter,hi,en,A,B,C,D,answer,explain`
-- `answer` uses zero-based option index: 0=A, 1=B, 2=C, 3=D.
-- Scores and questions are saved in the current browser's localStorage. For a shared permanent school-wide database, connect a database in a later deployment stage.
+## Deployment notes
+Use a Render **Web Service** with build command `npm install` and start command `npm start`. Configure all environment variables before deploying. Render Free services can sleep after inactivity; Telegram webhook updates may be delayed while the service wakes.
 
+## LG TV
+Open `/tv.html` on the TV and the dashboard on the phone. Use the same room code. If the TV's remote keyboard navigation is limited, use the mobile Controller.
 
-## Version 3.0 final improvements
-- Bulk select questions, select all filtered results, and delete selected questions with confirmation.
-- Dynamic Class and Subject filters based on imported question data.
-- Search now checks Hindi/English question text, chapter, subject, and available answer options.
-- Clear Filters button resets all filters and current selection.
-- Edit Question supports imported custom class/subject values and legacy `options` / `A-D` data shapes.
-- CSV export supports both current and legacy option fields.
-- CSV import accepts answer index `0–3` or letter `A/B/C/D`, validates invalid answer values, and checks all four option cells.
-- TV renderer supports legacy option fields and safely escapes option text.
-- Empty Question Bank state is handled more safely.
+## Existing browser data
+The existing V3 question bank is stored in each browser's localStorage. This integration does not automatically upload those private browser records. Export them as CSV and import them into the database through the dashboard or use the bot's `/add` command after setup.

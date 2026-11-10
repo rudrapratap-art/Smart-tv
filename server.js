@@ -1,13 +1,100 @@
-const express=require("express");
-const http=require("http");
-const {Server}=require("socket.io");
-const path=require("path");
-const app=express(), server=http.createServer(app), io=new Server(server);
-app.use(express.static(path.join(__dirname,"public")));
-app.get("/health",(req,res)=>res.json({ok:true,app:"Smart Classroom"}));
-io.on("connection",socket=>{
- socket.on("join-room",room=>{socket.join(room||"CLASS10");socket.emit("joined",room||"CLASS10");});
- socket.on("class-state",payload=>{socket.to(payload.room||"CLASS10").emit("class-state",payload.state);});
+const express = require("express");
+const http = require("http");
+const path = require("path");
+const { Server } = require("socket.io");
+const db = require("./lib/supabase");
+const bot = require("./bot");
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: false } });
+app.use(express.json({ limit: "1mb" }));
+app.use(express.static(path.join(__dirname, "public")));
+
+const DEFAULT_ROOM = String(process.env.CLASSROOM_ROOM || "CLASS10").toUpperCase();
+const ADMIN_KEY = process.env.CLASSROOM_ADMIN_KEY || "";
+const WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || "";
+
+function requireAdmin(req, res, next) {
+  if (!ADMIN_KEY || req.get("x-admin-key") !== ADMIN_KEY) {
+    return res.status(401).json({ error: "Unauthorized. Configure the classroom admin key." });
+  }
+  next();
+}
+
+app.get("/health", (req, res) => res.json({
+  ok: true,
+  app: "Smart Classroom",
+  databaseConfigured: db.isConfigured(),
+  telegramConfigured: Boolean(process.env.TELEGRAM_BOT_TOKEN)
+}));
+
+app.get("/api/questions", async (req, res) => {
+  try {
+    if (!db.isConfigured()) return res.status(503).json({ error: "Database is not configured" });
+    res.set("Cache-Control", "no-store");
+    res.json({ questions: await db.getQuestions() });
+  } catch (error) {
+    console.error("Questions API:", error.message);
+    res.status(500).json({ error: "Unable to load questions" });
+  }
 });
-const port=process.env.PORT||3000;
-server.listen(port,"0.0.0.0",()=>console.log(`Smart Classroom running on ${port}`));
+
+app.put("/api/questions", requireAdmin, async (req, res) => {
+  try {
+    if (!db.isConfigured()) return res.status(503).json({ error: "Database is not configured" });
+    if (!Array.isArray(req.body?.questions)) return res.status(400).json({ error: "questions must be an array" });
+    if (req.body.questions.length > 5000) return res.status(413).json({ error: "Question limit exceeded" });
+    const questions = await db.saveQuestions(req.body.questions);
+    res.json({ ok: true, count: questions.length });
+  } catch (error) {
+    console.error("Save questions API:", error.message);
+    res.status(500).json({ error: "Unable to save questions" });
+  }
+});
+
+app.post("/telegram/webhook", async (req, res) => {
+  if (!WEBHOOK_SECRET || req.get("x-telegram-bot-api-secret-token") !== WEBHOOK_SECRET) {
+    return res.sendStatus(401);
+  }
+  res.sendStatus(200);
+  try {
+    await bot.handleUpdate(req.body, io);
+  } catch (error) {
+    console.error("Telegram update failed:", error.message);
+  }
+});
+
+io.on("connection", socket => {
+  socket.on("join-room", async roomValue => {
+    const room = String(roomValue || DEFAULT_ROOM).toUpperCase().slice(0, 24);
+    socket.join(room);
+    socket.emit("joined", room);
+    try {
+      const questions = db.isConfigured() ? await db.getQuestions() : [];
+      const saved = db.isConfigured() ? await db.getClassroomState(room) : null;
+      if (saved) {
+        saved.questions = questions.length ? questions : (saved.questions || []);
+        socket.emit("class-state", saved);
+      } else if (questions.length) {
+        socket.emit("class-state", { questions, index: 0, showAnswer: false, room, language: "both", progress: true });
+      }
+    } catch (error) {
+      console.error("Room initialization:", error.message);
+    }
+  });
+
+  socket.on("class-state", payload => {
+    if (!payload || typeof payload !== "object") return;
+    const room = String(payload.room || DEFAULT_ROOM).toUpperCase().slice(0, 24);
+    socket.to(room).emit("class-state", payload.state);
+  });
+});
+
+const port = process.env.PORT || 3000;
+server.listen(port, "0.0.0.0", async () => {
+  console.log(`Smart Classroom running on ${port}`);
+  if (!db.isConfigured()) console.warn("Supabase is not configured; set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
+  try { await bot.configureWebhook(); }
+  catch (error) { console.error("Telegram webhook setup failed:", error.message); }
+});
