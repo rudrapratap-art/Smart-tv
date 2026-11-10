@@ -73,11 +73,12 @@ async function sendQuizQuestion(chatId, room, run) {
     text: String.fromCharCode(65 + index) + ". " + String(option).slice(0, 55),
     callback_data: "qz:" + quiz.id + ":" + index
   }]);
+  keyboard.push([{ text: "➡️ Next Question (Teacher)", callback_data: "qznext:" + quiz.id }]);
   const messageText = "📝 <b>SMART CLASSROOM LIVE QUIZ</b>\\n\\n" +
     "🎓 " + escapeHtml(q.cls) + " • " + escapeHtml(q.subject) + "\\n" +
     "📖 " + escapeHtml(q.chapter) + "\\n" +
     "🔢 प्रश्न " + (run.index + 1) + "/" + run.questions.length + "\\n" +
-    "⏳ शेष समय: <b>" + QUIZ_QUESTION_SECONDS + " सेकंड</b>\\n\\n" +
+    "👨‍🏫 शिक्षक के Next Question दबाने तक उत्तर दें।\\n\\n" +
     "<b>" + escapeHtml(questionText) + "</b>\\n\\n" +
     "नीचे दिए गए विकल्पों में से एक चुनें। हर विद्यार्थी का केवल पहला उत्तर स्वीकार होगा।";
   const sentMessage = await telegram("sendMessage", {
@@ -85,42 +86,10 @@ async function sendQuizQuestion(chatId, room, run) {
     reply_markup: { inline_keyboard: keyboard }
   });
   run.messageId = sentMessage.message_id;
-  run.deadline = Date.now() + QUIZ_QUESTION_SECONDS * 1000;
-  if (run.countdown) clearInterval(run.countdown);
-  run.countdown = setInterval(async () => {
-    try {
-      if (activeQuizRuns.get(String(chatId)) !== run) return;
-      const remaining = Math.max(0, Math.ceil((run.deadline - Date.now()) / 1000));
-      const updatedText = messageText.replace(
-        /⏳ शेष समय: <b>\\d+ सेकंड<\\/b>/,
-        "⏳ शेष समय: <b>" + remaining + " सेकंड</b>"
-      );
-      await telegram("editMessageText", {
-        chat_id: chatId, message_id: run.messageId,
-        text: updatedText, parse_mode: "HTML",
-        reply_markup: { inline_keyboard: keyboard }
-      });
-    } catch (error) {
-      console.error("Quiz countdown update:", error.message);
-    }
-  }, 5000);
-  run.timer = setTimeout(async () => {
-    try {
-      if (activeQuizRuns.get(String(chatId)) !== run) return;
-      run.index += 1;
-      if (run.index >= run.questions.length) await finishQuizRun(chatId, room, run, false);
-      else await sendQuizQuestion(chatId, room, run);
-    } catch (error) {
-      console.error("Automatic quiz progression:", error.message);
-      activeQuizRuns.delete(String(chatId));
-      await telegram("sendMessage", { chat_id: chatId, text: "⚠️ अगला प्रश्न भेजने में समस्या हुई: " + escapeHtml(error.message) });
-    }
-  }, QUIZ_QUESTION_SECONDS * 1000);
 }
 
 async function finishQuizRun(chatId, room, run, stopped = false) {
-  if (run.timer) clearTimeout(run.timer);
-  if (run.countdown) clearInterval(run.countdown);
+
   await db.stopTelegramQuiz(room);
   activeQuizRuns.delete(String(chatId));
   const totals = new Map();
@@ -502,6 +471,25 @@ async function handleUpdate(update, io) {
     const callback = update.callback_query;
     const chatId = callback.message?.chat?.id;
     const senderId = String(callback.from?.id || "");
+    if (String(callback.data || "").startsWith("qznext:")) {
+      if (!ADMIN_ID || senderId !== ADMIN_ID) {
+        await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "केवल शिक्षक अगला सवाल भेज सकते हैं।", show_alert: true });
+        return;
+      }
+      const quizId = String(callback.data).split(":")[1];
+      const run = activeQuizRuns.get(String(chatId));
+      const activeQuiz = await db.getActiveTelegramQuiz(chatId);
+      if (!run || !activeQuiz || activeQuiz.id !== quizId) {
+        await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "यह सवाल पहले ही आगे बढ़ चुका है।", show_alert: true });
+        return;
+      }
+      await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "अगला सवाल भेजा जा रहा है…" });
+      await telegram("editMessageReplyMarkup", { chat_id: chatId, message_id: callback.message.message_id, reply_markup: { inline_keyboard: [] } });
+      run.index += 1;
+      if (run.index >= run.questions.length) await finishQuizRun(chatId, run.room, run, false);
+      else await sendQuizQuestion(chatId, run.room, run);
+      return;
+    }
     if (String(callback.data || "").startsWith("qz:")) {
       const parts = callback.data.split(":");
       const quizId = parts[1];
@@ -705,12 +693,28 @@ async function handleUpdate(update, io) {
       const candidates = filterQuestionBank(bank, saved.filter || {});
       if (!candidates.length) throw new Error("पहले 🎓 Select Questions से Chapter चुनें या Question Bank में सवाल जोड़ें।");
       const previousRun = activeQuizRuns.get(String(chatId));
-      if (previousRun?.timer) clearTimeout(previousRun.timer);
-      if (previousRun?.countdown) clearInterval(previousRun.countdown);
       const run = { room, questions: candidates, index: 0, quizIds: [], timer: null };
       activeQuizRuns.set(String(chatId), run);
       await sendQuizQuestion(chatId, room, run);
-      await telegram("sendMessage", { chat_id: chatId, text: "✅ Quiz शुरू हो गया। हर प्रश्न के लिए 30 सेकंड हैं; समय पूरा होते ही अगला प्रश्न अपने-आप आएगा।" });
+      await telegram("sendMessage", { chat_id: chatId, text: "✅ Quiz शुरू हो गया। विद्यार्थी उत्तर देंगे; शिक्षक नीचे दिए गए ➡️ Next Question बटन से अगला सवाल भेजेंगे।" });
+      return;
+    }
+
+    if (command === "/quiznext") {
+      if (![ "group", "supergroup" ].includes(message.chat.type)) {
+        await reply(chatId, "अगला सवाल भेजने के लिए Class Group में /quiznext भेजें।");
+        return;
+      }
+      const run = activeQuizRuns.get(String(chatId));
+      const activeQuiz = await db.getActiveTelegramQuiz(chatId);
+      if (!run || !activeQuiz) {
+        await reply(chatId, "अभी कोई active Quiz नहीं है।");
+        return;
+      }
+      await telegram("editMessageReplyMarkup", { chat_id: chatId, message_id: activeQuiz.message_id || 0, reply_markup: { inline_keyboard: [] } }).catch(() => {});
+      run.index += 1;
+      if (run.index >= run.questions.length) await finishQuizRun(chatId, room, run, false);
+      else await sendQuizQuestion(chatId, room, run);
       return;
     }
 
@@ -873,6 +877,7 @@ async function configureWebhook() {
       { command: "csvtemplate", description: "Download sample CSV template" },
       { command: "backup", description: "Export question bank JSON and CSV" },
       { command: "quiz", description: "Start current question quiz in class group" },
+      { command: "quiznext", description: "Teacher sends the next quiz question" },
       { command: "quizstop", description: "Stop the active class quiz" },
       { command: "restore", description: "Restore questions from JSON backup" },
       { command: "edit", description: "Edit a question" },
