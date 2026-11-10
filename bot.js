@@ -1,4 +1,5 @@
 const db = require("./lib/supabase");
+const gemini = require("./lib/gemini");
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const ADMIN_ID = String(process.env.TELEGRAM_ADMIN_ID || "");
@@ -55,6 +56,7 @@ async function reply(chatId, text, keyboard = mainKeyboard) {
 const selectionSessions = new Map();
 const pendingCsvImports = new Map();
 const pendingRestores = new Map();
+const pendingAiGenerations = new Map();
 
 const activeQuizRuns = new Map();
 const QUIZ_QUESTION_SECONDS = 30;
@@ -553,6 +555,37 @@ async function handleUpdate(update, io) {
       await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "Unauthorized", show_alert: true });
       return;
     }
+    if (callback.data === "ai_cancel") {
+      pendingAiGenerations.delete(String(chatId));
+      await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "Cancelled" });
+      await telegram("editMessageReplyMarkup", { chat_id: chatId, message_id: callback.message.message_id, reply_markup: { inline_keyboard: [] } });
+      await reply(chatId, "❌ AI question import cancel कर दिया गया।");
+      return;
+    }
+    if (callback.data === "ai_confirm") {
+      const pendingAi = pendingAiGenerations.get(String(chatId));
+      if (!pendingAi || Date.now() - pendingAi.createdAt > 15 * 60 * 1000) {
+        pendingAiGenerations.delete(String(chatId));
+        await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "Preview expired. फिर Generate करें।", show_alert: true });
+        return;
+      }
+      await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "Saving questions..." });
+      pendingAiGenerations.delete(String(chatId));
+      await telegram("editMessageReplyMarkup", { chat_id: chatId, message_id: callback.message.message_id, reply_markup: { inline_keyboard: [] } });
+      try {
+        const existing = await db.getQuestions();
+        const seen = new Set(existing.map(questionFingerprint));
+        const additions = pendingAi.questions.filter(q => { const key = questionFingerprint(q); if (seen.has(key)) return false; seen.add(key); return true; });
+        if (!additions.length) { await reply(chatId, "ℹ️ सभी generated questions पहले से मौजूद हैं। कोई बदलाव नहीं हुआ।"); return; }
+        const combined = [...existing, ...additions];
+        await db.saveQuestions(combined);
+        const state = await getState(DEFAULT_ROOM, combined);
+        state.questions = combined;
+        await publish(io, DEFAULT_ROOM, state);
+        await reply(chatId, "✅ Gemini के " + additions.length + " नए questions Question Bank में save हो गए।\nDuplicates skipped: " + (pendingAi.questions.length - additions.length));
+      } catch (error) { console.error("AI question save:", error.message); await reply(chatId, "⚠️ Save failed: " + escapeHtml(error.message)); }
+      return;
+    }
     const pending = pendingCsvImports.get(String(chatId));
     if (callback.data === "restore_cancel") {
       pendingRestores.delete(String(chatId));
@@ -696,6 +729,24 @@ async function handleUpdate(update, io) {
         "</b>\nअब Next / Previous से सवाल चलाएँ।", mainKeyboard);
       return;
     }
+    if (command === "/generate") {
+      if (![ "private", "group", "supergroup" ].includes(message.chat.type)) return;
+      const parts = arg.split("|").map(x => x.trim());
+      if (parts.length < 3 || !parts[0] || !parts[1] || !parts[2]) {
+        await reply(chatId, "✨ <b>Gemini Question Generator</b>\nइस format में command भेजें:\n<code>/generate Class 10 | Science | Electricity | 10 | medium | both</code>\n\nक्रम: Class | Subject | Chapter | Count (1-50) | Difficulty (easy/medium/hard) | Language (hi/en/both)\n\nअंतिम तीन optional हैं।");
+        return;
+      }
+      const count = Math.max(1, Math.min(50, Number(parts[3]) || 10));
+      const difficulty = ["easy","medium","hard"].includes((parts[4] || "medium").toLowerCase()) ? (parts[4] || "medium").toLowerCase() : "medium";
+      const language = ["hi","en","both"].includes((parts[5] || "both").toLowerCase()) ? (parts[5] || "both").toLowerCase() : "both";
+      await reply(chatId, "⏳ Gemini " + count + " questions generate कर रहा है...");
+      const generated = await gemini.generateQuestions({ cls: parts[0], subject: parts[1], chapter: parts[2], count, difficulty, language });
+      pendingAiGenerations.set(String(chatId), { questions: generated, createdAt: Date.now() });
+      const preview = generated.slice(0, 5).map((q,i) => (i+1) + ". <b>" + escapeHtml(q.hi || q.en) + "</b>\n" + q.opts.map((o,j) => String.fromCharCode(65+j) + ". " + escapeHtml(o)).join("\n") + "\nAnswer: <b>" + ["A","B","C","D"][q.answer] + "</b>").join("\n\n");
+      await telegram("sendMessage", { chat_id: chatId, text: "✨ <b>Gemini Preview</b>\n\n📚 Generated: <b>" + generated.length + "</b>\n\n" + preview + (generated.length > 5 ? "\n\n…और " + (generated.length-5) + " questions" : "") + "\n\nConfirm करने पर Supabase Question Bank में save होंगे।", parse_mode: "HTML", reply_markup: { inline_keyboard: [[{text:"✅ Confirm & Save",callback_data:"ai_confirm"},{text:"❌ Cancel",callback_data:"ai_cancel"}]] } });
+      return;
+    }
+
     if (command === "/quiz") {
       if (!["group", "supergroup"].includes(message.chat.type)) {
         await reply(chatId, "📝 Quiz शुरू करने के लिए Bot को अपनी Class Telegram Group में Admin बनाकर उस Group में /quiz भेजें।");
@@ -762,7 +813,7 @@ async function handleUpdate(update, io) {
       await reply(chatId,
         "🏫 <b>Smart Classroom Admin Bot</b>\n\n" +
         "/status — classroom status\n/select — Class → Subject → Chapter चुनें\n/next — अगला सवाल\n/prev — पिछला सवाल\n/answer — उत्तर दिखाएँ\n/hide — उत्तर छिपाएँ\n" +
-        "/list — questions की सूची\n/add — नया question जोड़ें\n/csv — CSV import format\n/csvtemplate — sample CSV डाउनलोड करें\n/backup — JSON + CSV backup भेजें\n/restore — JSON backup restore करें\n/edit — question बदलें\n/delete ID — question हटाएँ\n\n" +
+        "/list — questions की सूची\n/add — नया question जोड़ें\n/generate — Gemini से MCQ बनाएं\n/csv — CSV import format\n/csvtemplate — sample CSV डाउनलोड करें\n/backup — JSON + CSV backup भेजें\n/restore — JSON backup restore करें\n/edit — question बदलें\n/delete ID — question हटाएँ\n\n" +
         "<b>/add format:</b>\n<code>/add Class 8 | Science | Light | प्रकाश क्या है? | What is light? | A | B | C | D | B | Explanation</code>\n" +
         "<b>/edit format:</b>\n<code>/edit ID | Class 8 | Science | Light | ...same fields...</code>"
       );
@@ -873,6 +924,7 @@ async function configureWebhook() {
       { command: "csv", description: "Preview and import CSV questions" },
       { command: "csvtemplate", description: "Download sample CSV template" },
       { command: "backup", description: "Export question bank JSON and CSV" },
+      { command: "generate", description: "Generate MCQs with Gemini AI" },
       { command: "quiz", description: "Start current question quiz in class group" },
       { command: "quiznext", description: "Teacher sends the next quiz question" },
       { command: "quizstop", description: "Stop the active class quiz" },
