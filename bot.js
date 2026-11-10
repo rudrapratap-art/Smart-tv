@@ -313,6 +313,7 @@ async function configureWebhook() {
       { command: "hide", description: "Hide answer" },
       { command: "list", description: "List questions" },
       { command: "add", description: "Add a question" },
+      { command: "csv", description: "CSV import format" },
       { command: "edit", description: "Edit a question" },
       { command: "delete", description: "Delete a question" }
     ]
