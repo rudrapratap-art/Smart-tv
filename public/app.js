@@ -149,7 +149,8 @@ function renderList(){
 }
 function esc(s){return String(s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 ["classFilter","subjectFilter"].forEach(id=>$(id).addEventListener("change",renderList));
-["searchQuestion","chapterFilter"].forEach(id=>$(id).addEventListener("input",renderList));
+$("searchQuestion").addEventListener("input",renderList);
+$("chapterFilter").addEventListener("change",renderList);
 if($("clearFilters"))$("clearFilters").onclick=()=>{
  $("classFilter").value="all";$("subjectFilter").value="all";$("chapterFilter").value="all";$("searchQuestion").value="";
  selectedQuestionIds.clear();renderList();
