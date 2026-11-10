@@ -27,8 +27,12 @@ function persist(){
  }
 }
 function toast(t){let el=$("toast");el.textContent=t;el.classList.add("show");setTimeout(()=>el.classList.remove("show"),2200)}
-function current(){return questions.length?questions[Math.max(0,Math.min(index,questions.length-1))]:null}
-function state(){return {questions,index,showAnswer,room,language:$("displayLanguage")?.value||"both",progress:$("showProgress")?.checked!==false};}
+let controllerFilter={cls:"all",subjects:[],chapters:[]};
+function getControllerQuestions(){
+ return questions.filter(q=>(controllerFilter.cls==="all"||q.cls===controllerFilter.cls)&&(!controllerFilter.subjects.length||controllerFilter.subjects.includes(q.subject))&&(!controllerFilter.chapters.length||controllerFilter.chapters.includes(q.chapter)));
+}
+function current(){const list=getControllerQuestions();return list.length?list[Math.max(0,Math.min(index,list.length-1))]:null}
+function state(){const list=getControllerQuestions();return {questions:list,index,showAnswer,room,language:$("displayLanguage")?.value||"both",progress:$("showProgress")?.checked!==false};}
 function broadcast(){if(socket)socket.emit("class-state",{room,state:state()});}
 if(socket){
  socket.on("connect",()=>{$("connectionStatus").textContent="Connected";socket.emit("join-room",room)});
@@ -50,27 +54,73 @@ async function bootstrapRemote(){
 }
 function showPage(id){document.querySelectorAll(".page").forEach(p=>p.classList.toggle("active",p.id===id));document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active",b.dataset.page===id));if(id==="controller")renderController()}
 document.querySelectorAll("[data-page]").forEach(b=>b.addEventListener("click",()=>showPage(b.dataset.page)));
-function move(n){if(n>0&&$("questionOrder")?.value==="random"&&questions.length>1){let next=index;while(next===index)next=Math.floor(Math.random()*questions.length);index=next}else index=Math.max(0,Math.min(questions.length-1,index+n));showAnswer=false;renderController();broadcast();resetTimer()}
-function renderController(){let q=current();if(!q){$("controllerQuestion").textContent="Question Bank में कोई प्रश्न नहीं है।";$("currentNumber").textContent="0 / 0";$("revealBtn").textContent="Show Answer";$("roomCode").value=room;return}$("controllerQuestion").textContent=[q.hi,q.en].filter(Boolean).join(" / ");$("currentNumber").textContent=(index+1)+" / "+questions.length;$("revealBtn").textContent=showAnswer?"Answer Shown":"Show Answer";$("roomCode").value=room}
+function move(n){
+ const list=getControllerQuestions();
+ if(n>0&&$("questionOrder")?.value==="random"&&list.length>1){let next=index;while(next===index)next=Math.floor(Math.random()*list.length);index=next}
+ else index=Math.max(0,Math.min(list.length-1,index+n));
+ showAnswer=false;renderController();broadcast();resetTimer()
+}
+function fillSelect(select,values,placeholder,selected=[]){
+ if(!select)return;
+ const previous=selected.length?selected:Array.from(select.selectedOptions||[]).map(o=>o.value);
+ select.innerHTML=(select.multiple?"":'<option value="all">'+placeholder+'</option>')+values.map(v=>'<option value="'+esc(v)+'">'+esc(v)+'</option>').join("");
+ if(select.multiple){Array.from(select.options).forEach(o=>o.selected=previous.includes(o.value))}
+ else select.value=values.includes(previous[0])?previous[0]:"all";
+}
+function updateControllerOptions(){
+ const cls=$("controllerClass"),subs=$("controllerSubjects"),chaps=$("controllerChapters");
+ if(!cls||!subs||!chaps)return;
+ const oldClass=cls.value||controllerFilter.cls;
+ const classes=[...new Set(questions.map(q=>q.cls).filter(Boolean))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+ fillSelect(cls,classes,"All Classes",[oldClass]);
+ controllerFilter.cls=cls.value||"all";
+ const scoped=questions.filter(q=>controllerFilter.cls==="all"||q.cls===controllerFilter.cls);
+ const subjects=[...new Set(scoped.map(q=>q.subject).filter(Boolean))].sort();
+ fillSelect(subs,subjects,"",controllerFilter.subjects);
+ const activeSubjects=Array.from(subs.selectedOptions).map(o=>o.value);
+ const chapters=[...new Set(scoped.filter(q=>!activeSubjects.length||activeSubjects.includes(q.subject)).map(q=>q.chapter).filter(Boolean))].sort();
+ fillSelect(chaps,chapters,"",controllerFilter.chapters);
+ controllerFilter.subjects=activeSubjects;
+ controllerFilter.chapters=Array.from(chaps.selectedOptions).map(o=>o.value);
+}
+function renderController(){
+ updateControllerOptions();
+ const list=getControllerQuestions(),q=current();
+ if(!q){$("controllerQuestion").textContent="इस selection में कोई प्रश्न नहीं है। Class, Subject या Chapter बदलें।";$("currentNumber").textContent="0 / 0";$("revealBtn").textContent="Show Answer";$("roomCode").value=room;$("controllerFilterSummary").textContent="No matching questions";return}
+ index=Math.max(0,Math.min(index,list.length-1));
+ $("controllerQuestion").textContent=[q.hi,q.en].filter(Boolean).join(" / ");
+ $("currentNumber").textContent=(index+1)+" / "+list.length;
+ $("revealBtn").textContent=showAnswer?"Answer Shown":"Show Answer";
+ $("roomCode").value=room;
+ $("controllerFilterSummary").textContent=list.length+" questions selected • "+(controllerFilter.cls==="all"?"All classes":controllerFilter.cls)+" • "+(controllerFilter.subjects.length?controllerFilter.subjects.join(", "):"All subjects")+" • "+(controllerFilter.chapters.length?controllerFilter.chapters.join(", "):"All chapters");
+}
+$("controllerClass").onchange=()=>{controllerFilter.cls=$("controllerClass").value;controllerFilter.subjects=[];controllerFilter.chapters=[];updateControllerOptions();renderController()};
+$("controllerSubjects").onchange=()=>{controllerFilter.subjects=Array.from($("controllerSubjects").selectedOptions).map(o=>o.value);controllerFilter.chapters=[];updateControllerOptions();renderController()};
+$("controllerChapters").onchange=()=>{controllerFilter.chapters=Array.from($("controllerChapters").selectedOptions).map(o=>o.value);renderController()};
+$("applyControllerFilter").onclick=()=>{controllerFilter.cls=$("controllerClass").value;controllerFilter.subjects=Array.from($("controllerSubjects").selectedOptions).map(o=>o.value);controllerFilter.chapters=Array.from($("controllerChapters").selectedOptions).map(o=>o.value);index=0;showAnswer=false;renderController();broadcast();resetTimer();toast(getControllerQuestions().length+" questions loaded on TV")};
+$("resetControllerFilter").onclick=()=>{controllerFilter={cls:"all",subjects:[],chapters:[]};$("controllerClass").value="all";Array.from($("controllerSubjects").options).forEach(o=>o.selected=false);Array.from($("controllerChapters").options).forEach(o=>o.selected=false);index=0;showAnswer=false;renderController();broadcast();resetTimer()};
 $("prevBtn").onclick=()=>move(-1);$("nextBtn").onclick=()=>move(1);$("revealBtn").onclick=()=>{showAnswer=true;renderController();broadcast()};$("resetBtn").onclick=()=>{showAnswer=false;renderController();broadcast()};
 function updateFilterOptions(){
- const classSelect=$("classFilter"), subjectSelect=$("subjectFilter");
- if(!classSelect||!subjectSelect)return;
- const currentClass=classSelect.value||"all", currentSubject=subjectSelect.value||"all";
+ const classSelect=$("classFilter"),subjectSelect=$("subjectFilter"),chapterSelect=$("chapterFilter");
+ if(!classSelect||!subjectSelect||!chapterSelect)return;
+ const currentClass=classSelect.value||"all",currentSubject=subjectSelect.value||"all",currentChapter=chapterSelect.value||"all";
  const classes=[...new Set(questions.map(q=>String(q.cls||"").trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
- const subjects=[...new Set(questions.map(q=>String(q.subject||"").trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
- classSelect.innerHTML='<option value="all">All Classes</option>'+classes.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join("");
- subjectSelect.innerHTML='<option value="all">All Subjects</option>'+subjects.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join("");
+ const subjects=[...new Set(questions.filter(q=>currentClass==="all"||q.cls===currentClass).map(q=>String(q.subject||"").trim()).filter(Boolean))].sort();
+ const chapters=[...new Set(questions.filter(q=>(currentClass==="all"||q.cls===currentClass)&&(currentSubject==="all"||q.subject===currentSubject)).map(q=>String(q.chapter||"").trim()).filter(Boolean))].sort();
+ classSelect.innerHTML='<option value="all">All Classes</option>'+classes.map(v=>'<option value="'+esc(v)+'">'+esc(v)+'</option>').join("");
+ subjectSelect.innerHTML='<option value="all">All Subjects</option>'+subjects.map(v=>'<option value="'+esc(v)+'">'+esc(v)+'</option>').join("");
+ chapterSelect.innerHTML='<option value="all">All Chapters</option>'+chapters.map(v=>'<option value="'+esc(v)+'">'+esc(v)+'</option>').join("");
  classSelect.value=classes.includes(currentClass)?currentClass:"all";
  subjectSelect.value=subjects.includes(currentSubject)?currentSubject:"all";
+ chapterSelect.value=chapters.includes(currentChapter)?currentChapter:"all";
 }
 function getFilteredQuestions(){
  const c=$("classFilter")?.value||"all", s=$("subjectFilter")?.value||"all";
  const term=($("searchQuestion")?.value||"").trim().toLocaleLowerCase();
- const chapter=($("chapterFilter")?.value||"").trim().toLocaleLowerCase();
+ const chapter=$("chapterFilter")?.value||"all";
  return questions.filter(q=>{
   const haystack=[q.hi,q.en,q.chapter,q.subject,...(Array.isArray(q.opts)?q.opts:(Array.isArray(q.options)?q.options:[]))].join(" ").toLocaleLowerCase();
-  return (c==="all"||q.cls===c)&&(s==="all"||q.subject===s)&&(!term||haystack.includes(term))&&(!chapter||String(q.chapter||"").toLocaleLowerCase().includes(chapter));
+  return (c==="all"||q.cls===c)&&(s==="all"||q.subject===s)&&(!term||haystack.includes(term))&&(chapter==="all"||String(q.chapter||"")===chapter);
  });
 }
 function renderList(){
@@ -101,7 +151,7 @@ function esc(s){return String(s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&l
 ["classFilter","subjectFilter"].forEach(id=>$(id).addEventListener("change",renderList));
 ["searchQuestion","chapterFilter"].forEach(id=>$(id).addEventListener("input",renderList));
 if($("clearFilters"))$("clearFilters").onclick=()=>{
- $("classFilter").value="all";$("subjectFilter").value="all";$("chapterFilter").value="";$("searchQuestion").value="";
+ $("classFilter").value="all";$("subjectFilter").value="all";$("chapterFilter").value="all";$("searchQuestion").value="";
  selectedQuestionIds.clear();renderList();
 };
 if($("selectAllFiltered"))$("selectAllFiltered").onchange=e=>{getFilteredQuestions().forEach(q=>{const id=String(q.id);if(e.target.checked)selectedQuestionIds.add(id);else selectedQuestionIds.delete(id)});renderList()};
