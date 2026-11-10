@@ -280,7 +280,7 @@ async function handleUpdate(update, io) {
       await reply(chatId,
         "🏫 <b>Smart Classroom Admin Bot</b>\n\n" +
         "/status — classroom status\n/next — अगला सवाल\n/prev — पिछला सवाल\n/answer — उत्तर दिखाएँ\n/hide — उत्तर छिपाएँ\n" +
-        "/list — questions की सूची\n/add — नया question जोड़ें\n/csv — CSV import format\n/edit — question बदलें\n/delete ID — question हटाएँ\n\n" +
+        "/list — questions की सूची\n/add — नया question जोड़ें\n/csv — CSV import format\n/csvtemplate — sample CSV डाउनलोड करें\n/edit — question बदलें\n/delete ID — question हटाएँ\n\n" +
         "<b>/add format:</b>\n<code>/add Class 8 | Science | Light | प्रकाश क्या है? | What is light? | A | B | C | D | B | Explanation</code>\n" +
         "<b>/edit format:</b>\n<code>/edit ID | Class 8 | Science | Light | ...same fields...</code>"
       );
