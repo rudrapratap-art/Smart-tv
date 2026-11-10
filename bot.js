@@ -643,15 +643,15 @@ async function handleUpdate(update, io) {
     }
 
     if (["/next", "/prev", "/answer", "/hide"].includes(command)) {
-      if (!questions.length) throw new Error("Question Bank खाली है। पहले /add करें।");
+      if (!activeQuestions.length) throw new Error("इस selection में कोई question नहीं है। 🎓 Select Questions से नया Chapter चुनें।");
       if (command === "/next") state.index = Math.min(activeQuestions.length - 1, state.index + 1);
       if (command === "/prev") state.index = Math.max(0, state.index - 1);
       if (command === "/answer") state.showAnswer = true;
       if (command === "/hide") state.showAnswer = false;
-      state.questions = questions;
+      state.questions = activeQuestions;
       await publish(io, room, state);
-      const current = questions[state.index];
-      await reply(chatId, `✅ TV updated: ${state.index + 1}/${questions.length}\n${escapeHtml(current.hi || current.en)}`);
+      const current = activeQuestions[state.index];
+      await reply(chatId, `✅ TV updated: ${state.index + 1}/${activeQuestions.length}\n${escapeHtml(current.hi || current.en)}`);
       return;
     }
 
@@ -679,6 +679,7 @@ async function configureWebhook() {
     commands: [
       { command: "start", description: "Open Smart Classroom bot" },
       { command: "status", description: "Show classroom status" },
+      { command: "select", description: "Select class, subject and chapter" },
       { command: "next", description: "Next question" },
       { command: "prev", description: "Previous question" },
       { command: "answer", description: "Show answer" },
