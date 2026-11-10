@@ -4,6 +4,7 @@ const path = require("path");
 const { Server } = require("socket.io");
 const db = require("./lib/supabase");
 const bot = require("./bot");
+const gemini = require("./lib/gemini");
 
 const app = express();
 const server = http.createServer(app);
@@ -37,6 +38,21 @@ app.get("/api/questions", async (req, res) => {
   } catch (error) {
     console.error("Questions API:", error.message);
     res.status(500).json({ error: "Unable to load questions" });
+  }
+});
+
+app.post("/api/ai/generate", requireAdmin, async (req, res) => {
+  try {
+    const { cls, subject, chapter, count, difficulty, language } = req.body || {};
+    if (!String(cls || "").trim() || !String(subject || "").trim() || !String(chapter || "").trim()) {
+      return res.status(400).json({ error: "Class, Subject और Chapter जरूरी हैं।" });
+    }
+    const questions = await gemini.generateQuestions({ cls: String(cls).slice(0,40), subject: String(subject).slice(0,60), chapter: String(chapter).slice(0,100), count, difficulty, language });
+    res.set("Cache-Control", "no-store");
+    res.json({ ok: true, questions });
+  } catch (error) {
+    console.error("Gemini generation:", error.message);
+    res.status(502).json({ error: error.message || "Question generation failed" });
   }
 });
 
