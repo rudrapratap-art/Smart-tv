@@ -111,8 +111,6 @@ async function handleUpdate(update, io) {
       const id = arg.slice(0, separator).trim();
       const index = questions.findIndex(q => String(q.id) === id);
       if (index < 0) throw new Error("इस ID का question नहीं मिला। /list देखें।");
-      questions[index] = { ...parseQuestionFields(arg, 0), id };
-      // Remove the ID field before parsing the remaining question fields.
       questions[index] = { ...parseQuestionFields(arg.slice(separator + 1)), id };
       await db.saveQuestions(questions);
       state.questions = questions;
