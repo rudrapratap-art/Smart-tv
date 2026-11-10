@@ -23,6 +23,7 @@ function escapeHtml(value) {
 const mainKeyboard = {
   keyboard: [
     [{ text: "🏠 Home" }, { text: "📂 Second menu" }],
+    [{ text: "🎓 Select Questions" }],
     [{ text: "▶️ Next" }, { text: "◀️ Previous" }],
     [{ text: "👁 Show Answer" }, { text: "🙈 Hide Answer" }]
   ],
@@ -50,6 +51,7 @@ async function reply(chatId, text, keyboard = mainKeyboard) {
   });
 }
 
+const selectionSessions = new Map();
 const pendingCsvImports = new Map();
 const pendingRestores = new Map();
 
@@ -215,6 +217,43 @@ async function commitCsvImport(chatId, incoming, io, room) {
     "📚 Total question bank: " + combined.length + "\n\n" +
     "पुराने questions सुरक्षित रखे गए हैं।"
   );
+}
+
+function filterQuestionBank(questions, filter = {}) {
+  return (questions || []).filter(q =>
+    (!filter.cls || String(q.cls) === String(filter.cls)) &&
+    (!filter.subject || String(q.subject) === String(filter.subject)) &&
+    (!filter.chapter || String(q.chapter) === String(filter.chapter))
+  );
+}
+
+function optionKeyboard(prefix, values, backText = "⬅️ Back") {
+  const buttons = values.map(value => ({ text: prefix + value }));
+  const rows = [];
+  for (let i = 0; i < buttons.length; i += 2) rows.push(buttons.slice(i, i + 2));
+  rows.push([{ text: backText }, { text: "🏠 Home" }]);
+  return { keyboard: rows, resize_keyboard: true, is_persistent: true, input_field_placeholder: "Choose an option…" };
+}
+
+async function showClassSelection(chatId, questions) {
+  const classes = [...new Set(questions.map(q => String(q.cls || "").trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+  if (!classes.length) return reply(chatId, "Question Bank खाली है। पहले questions add करें।");
+  selectionSessions.set(String(chatId), { stage: "class", filter: {} });
+  await reply(chatId, "🎓 <b>Select Class</b>\\nअपनी class चुनें:", optionKeyboard("🏫 ", classes));
+}
+
+async function showSubjectSelection(chatId, questions, filter) {
+  const subjects = [...new Set(filterQuestionBank(questions, { cls: filter.cls }).map(q => String(q.subject || "").trim()).filter(Boolean))].sort();
+  if (!subjects.length) return reply(chatId, "इस Class में कोई Subject नहीं मिला।", mainKeyboard);
+  selectionSessions.set(String(chatId), { stage: "subject", filter });
+  await reply(chatId, "📘 <b>Select Subject</b>\\nClass: " + escapeHtml(filter.cls), optionKeyboard("📘 ", subjects));
+}
+
+async function showChapterSelection(chatId, questions, filter) {
+  const chapters = [...new Set(filterQuestionBank(questions, { cls: filter.cls, subject: filter.subject }).map(q => String(q.chapter || "").trim()).filter(Boolean))].sort();
+  if (!chapters.length) return reply(chatId, "इस Subject में कोई Chapter नहीं मिला।", mainKeyboard);
+  selectionSessions.set(String(chatId), { stage: "chapter", filter });
+  await reply(chatId, "📖 <b>Select Chapter</b>\\n" + escapeHtml(filter.cls + " / " + filter.subject), optionKeyboard("📖 ", chapters));
 }
 
 async function getState(room, questions) {
@@ -440,13 +479,32 @@ async function handleUpdate(update, io) {
       "📄 CSV Help": "/csv",
       "📥 CSV Template": "/csvtemplate",
       "⬅️ Main menu": "/mainmenu",
-      "📂 Second menu": "/secondmenu"
+      "📂 Second menu": "/secondmenu",
+      "🎓 Select Questions": "/select",
+      "⬅️ Back": "/backselect"
     };
     const normalizedText = buttonCommands[buttonText] || buttonText;
     const [commandToken, ...rest] = normalizedText.split(/\s+/);
     const command = commandToken.split("@")[0].toLowerCase();
     const arg = rest.join(" ").trim();
 
+    if (command === "/select") {
+      selectionSessions.delete(String(chatId));
+      await showClassSelection(chatId, await db.getQuestions());
+      return;
+    }
+    if (command === "/backselect") {
+      const session = selectionSessions.get(String(chatId));
+      const bank = await db.getQuestions();
+      if (!session || session.stage === "class") {
+        await showClassSelection(chatId, bank);
+      } else if (session.stage === "subject") {
+        await showClassSelection(chatId, bank);
+      } else {
+        await showSubjectSelection(chatId, bank, { cls: session.filter.cls });
+      }
+      return;
+    }
     if (command === "/secondmenu") {
       await reply(chatId, "📂 <b>Question Bank Menu</b>\\nBackup, Restore और CSV tools चुनें।", secondKeyboard);
       return;
@@ -456,6 +514,39 @@ async function handleUpdate(update, io) {
       return;
     }
 
+    const selection = selectionSessions.get(String(chatId));
+    if (selection && buttonText.startsWith("🏫 ")) {
+      const cls = buttonText.slice(3);
+      const bank = await db.getQuestions();
+      if (!bank.some(q => String(q.cls) === cls)) throw new Error("यह Class अब Question Bank में नहीं है।");
+      await showSubjectSelection(chatId, bank, { cls });
+      return;
+    }
+    if (selection && buttonText.startsWith("📘 ")) {
+      const subject = buttonText.slice(3);
+      const bank = await db.getQuestions();
+      if (!filterQuestionBank(bank, { cls: selection.filter.cls }).some(q => String(q.subject) === subject)) throw new Error("यह Subject चुनी गई Class में नहीं है।");
+      await showChapterSelection(chatId, bank, { cls: selection.filter.cls, subject });
+      return;
+    }
+    if (selection && buttonText.startsWith("📖 ")) {
+      const chapter = buttonText.slice(3);
+      const bank = await db.getQuestions();
+      const filtered = filterQuestionBank(bank, { cls: selection.filter.cls, subject: selection.filter.subject, chapter });
+      if (!filtered.length) throw new Error("इस Chapter में कोई question नहीं मिला।");
+      const saved = await getState(room, bank);
+      saved.questions = filtered;
+      saved.filter = { ...selection.filter, chapter };
+      saved.index = 0;
+      saved.showAnswer = false;
+      selectionSessions.delete(String(chatId));
+      await publish(io, room, saved);
+      await reply(chatId, "✅ <b>Chapter Selected!</b>\\n" +
+        "Class: " + escapeHtml(selection.filter.cls) + "\\nSubject: " + escapeHtml(selection.filter.subject) +
+        "\\nChapter: " + escapeHtml(chapter) + "\\nQuestions: <b>" + filtered.length +
+        "</b>\\nअब Next / Previous से सवाल चलाएँ।", mainKeyboard);
+      return;
+    }
     if (command === "/backup") {
       await backupCommand(chatId);
       return;
@@ -496,16 +587,17 @@ async function handleUpdate(update, io) {
 
     const questions = await db.getQuestions();
     let state = await getState(room, questions);
-    state.questions = questions;
+    const activeQuestions = filterQuestionBank(questions, state.filter || {});
+    state.questions = activeQuestions;
 
     if (command === "/status") {
-      const q = questions[state.index];
-      await reply(chatId, `🟢 <b>Room:</b> ${escapeHtml(room)}\n<b>Questions:</b> ${questions.length}\n<b>Current:</b> ${questions.length ? state.index + 1 : 0}/${questions.length}\n<b>Answer:</b> ${state.showAnswer ? "Visible" : "Hidden"}\n${q ? escapeHtml(q.hi || q.en) : "No question selected"}`);
+      const q = activeQuestions[state.index];
+      await reply(chatId, `🟢 <b>Room:</b> ${escapeHtml(room)}\n<b>Questions:</b> ${activeQuestions.length}\n<b>Current:</b> ${activeQuestions.length ? state.index + 1 : 0}/${activeQuestions.length}\n<b>Answer:</b> ${state.showAnswer ? "Visible" : "Hidden"}\n${q ? escapeHtml(q.hi || q.en) : "No question selected"}`);
       return;
     }
 
     if (command === "/list") {
-      const lines = questions.slice(0, 30).map((q, i) => `${i + 1}. <code>${escapeHtml(q.id)}</code> — ${escapeHtml(q.cls)} / ${escapeHtml(q.subject)} — ${escapeHtml(q.hi || q.en).slice(0, 90)}`);
+      const lines = activeQuestions.slice(0, 30).map((q, i) => `${i + 1}. <code>${escapeHtml(q.id)}</code> — ${escapeHtml(q.cls)} / ${escapeHtml(q.subject)} — ${escapeHtml(q.hi || q.en).slice(0, 90)}`);
       await reply(chatId, lines.length ? lines.join("\n") : "Question Bank खाली है। /add से सवाल जोड़ें।");
       return;
     }
@@ -552,7 +644,7 @@ async function handleUpdate(update, io) {
 
     if (["/next", "/prev", "/answer", "/hide"].includes(command)) {
       if (!questions.length) throw new Error("Question Bank खाली है। पहले /add करें।");
-      if (command === "/next") state.index = Math.min(questions.length - 1, state.index + 1);
+      if (command === "/next") state.index = Math.min(activeQuestions.length - 1, state.index + 1);
       if (command === "/prev") state.index = Math.max(0, state.index - 1);
       if (command === "/answer") state.showAnswer = true;
       if (command === "/hide") state.showAnswer = false;
