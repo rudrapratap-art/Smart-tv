@@ -127,10 +127,13 @@ async function previewRestoreDocument(message) {
 async function commitRestore(chatId, incoming, io, room) {
   const existing = await db.getQuestions();
   const seen = new Set(existing.map(questionFingerprint));
+  const existingIds = new Set(existing.map(q => String(q.id)));
   const additions = incoming.filter(q => {
     const key = questionFingerprint(q);
     if (seen.has(key)) return false;
     seen.add(key);
+    if (existingIds.has(String(q.id))) q.id = `restore_${Date.now()}_${Math.floor(Math.random()*1000000)}`;
+    existingIds.add(String(q.id));
     return true;
   });
   if (!additions.length) {
