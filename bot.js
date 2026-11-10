@@ -49,9 +49,130 @@ function parseQuestionFields(raw, offset = 0) {
   return { cls, subject, chapter, hi, en, opts: [a, b, c, d], answer, explain: explain.join(" | ") };
 }
 
+
+function parseCsv(text) {
+  const rows = [];
+  let row = [], cell = "", quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quoted) {
+      if (ch === '"' && text[i + 1] === '"') { cell += '"'; i++; }
+      else if (ch === '"') quoted = false;
+      else cell += ch;
+    } else if (ch === '"' && cell.length === 0) quoted = true;
+    else if (ch === ",") { row.push(cell); cell = ""; }
+    else if (ch === "\n") { row.push(cell.replace(/\r$/, "")); rows.push(row); row = []; cell = ""; }
+    else cell += ch;
+  }
+  if (quoted) throw new Error("CSV में closing quote नहीं मिला। Excel से दोबारा CSV UTF-8 में save करें।");
+  if (cell.length || row.length) { row.push(cell.replace(/\r$/, "")); rows.push(row); }
+  return rows.filter(r => r.some(v => String(v).trim() !== ""));
+}
+
+function normalizeHeader(value) {
+  return String(value || "").replace(/^\uFEFF/, "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function parseQuestionsCsv(csvText) {
+  const rows = parseCsv(csvText);
+  if (rows.length < 2) throw new Error("CSV में header और कम-से-कम एक question होना चाहिए।");
+  const headers = rows[0].map(normalizeHeader);
+  const aliases = {
+    cls: ["cls", "class", "class_name"],
+    subject: ["subject"],
+    chapter: ["chapter", "topic"],
+    hi: ["hi", "hindi", "question_hi", "question_hindi"],
+    en: ["en", "english", "question_en", "question_english"],
+    a: ["a", "option_a", "option1"],
+    b: ["b", "option_b", "option2"],
+    c: ["c", "option_c", "option3"],
+    d: ["d", "option_d", "option4"],
+    answer: ["answer", "correct_answer", "correct"],
+    explain: ["explain", "explanation", "solution"]
+  };
+  const index = {};
+  for (const [key, names] of Object.entries(aliases)) index[key] = headers.findIndex(h => names.includes(h));
+  const required = ["cls", "subject", "chapter", "a", "b", "c", "d", "answer"];
+  const missing = required.filter(k => index[k] < 0);
+  if (index.hi < 0 && index.en < 0) missing.push("hi या en");
+  if (missing.length) throw new Error("CSV headers missing: " + missing.join(", ") + ". /csv से सही format देखें।");
+
+  const questions = [];
+  const errors = [];
+  for (let i = 1; i < rows.length; i++) {
+    const values = rows[i];
+    const get = key => index[key] < 0 ? "" : String(values[index[key]] ?? "").trim();
+    const answerRaw = get("answer").toUpperCase();
+    const letters = ["A", "B", "C", "D"];
+    const answer = letters.indexOf(answerRaw) >= 0 ? letters.indexOf(answerRaw) : (/^[0-3]$/.test(answerRaw) ? Number(answerRaw) : -1);
+    if (!get("cls") || !get("subject") || !get("chapter") || (!get("hi") && !get("en")) ||
+        ![get("a"), get("b"), get("c"), get("d")].every(Boolean) || answer < 0) {
+      errors.push(i + 1);
+      continue;
+    }
+    questions.push({
+      id: "csv_" + Date.now() + "_" + i + "_" + Math.floor(Math.random() * 10000),
+      cls: get("cls"), subject: get("subject"), chapter: get("chapter"),
+      hi: get("hi"), en: get("en"),
+      opts: [get("a"), get("b"), get("c"), get("d")],
+      answer, explain: get("explain")
+    });
+  }
+  if (errors.length) throw new Error("CSV row " + errors.slice(0, 12).join(", ") + " में जरूरी data/answer गलत है" + (errors.length > 12 ? " और " + (errors.length - 12) + " अन्य rows" : "") + "। कोई भी row import नहीं की गई।");
+  if (!questions.length) throw new Error("CSV में import करने लायक question नहीं मिला।");
+  if (questions.length > 1000) throw new Error("एक बार में अधिकतम 1000 questions import कर सकते हैं।");
+  return questions;
+}
+
+function questionFingerprint(q) {
+  return [q.cls, q.subject, q.chapter, q.hi, q.en, ...(q.opts || [])]
+    .map(v => String(v || "").trim().toLowerCase()).join("|");
+}
+
+async function importCsvDocument(message, io, room) {
+  const doc = message.document;
+  const fileName = String(doc.file_name || "").toLowerCase();
+  if (!fileName.endsWith(".csv")) throw new Error("कृपया केवल .csv file भेजें।");
+  if (Number(doc.file_size || 0) > 5 * 1024 * 1024) throw new Error("CSV file अधिकतम 5 MB की हो सकती है।");
+  const fileInfo = await telegram("getFile", { file_id: doc.file_id });
+  if (!fileInfo.file_path) throw new Error("Telegram से file path नहीं मिला।");
+  const response = await fetch("https://api.telegram.org/file/bot" + BOT_TOKEN + "/" + fileInfo.file_path);
+  if (!response.ok) throw new Error("CSV download failed (" + response.status + ")");
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.length > 5 * 1024 * 1024) throw new Error("CSV file अधिकतम 5 MB की हो सकती है।");
+  const incoming = parseQuestionsCsv(bytes.toString("utf8").replace(/^\uFEFF/, ""));
+  const existing = await db.getQuestions();
+  const seen = new Set(existing.map(questionFingerprint));
+  const additions = incoming.filter(q => {
+    const key = questionFingerprint(q);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (!additions.length) {
+    await reply(message.chat.id, "ℹ️ CSV में " + incoming.length + " questions मिले, लेकिन सभी पहले से मौजूद हैं। कोई duplicate add नहीं किया गया।");
+    return;
+  }
+  const combined = [...existing, ...additions];
+  await db.saveQuestions(combined);
+  const state = await getState(room, combined);
+  state.questions = combined;
+  state.room = room;
+  if (!Number.isInteger(state.index) || state.index < 0 || state.index >= combined.length) state.index = 0;
+  await publish(io, room, state);
+  await reply(message.chat.id,
+    "✅ <b>CSV Import पूरा हुआ!</b>\n" +
+    "📥 CSV में मिले: " + incoming.length + "\n" +
+    "➕ नए questions add: " + additions.length + "\n" +
+    "⏭️ Duplicate skip: " + (incoming.length - additions.length) + "\n" +
+    "📚 Total question bank: " + combined.length + "\n\n" +
+    "पुराने questions सुरक्षित रखे गए हैं।"
+  );
+}
+
 async function handleUpdate(update, io) {
   const message = update?.message;
-  if (!message?.text) return;
+  if (!message || (!message.text && !message.document)) return;
   const chatId = message.chat.id;
   const senderId = String(message.from?.id || "");
   if (!ADMIN_ID || senderId !== ADMIN_ID) {
@@ -59,17 +180,34 @@ async function handleUpdate(update, io) {
     return;
   }
 
-  const [commandToken, ...rest] = message.text.trim().split(/\s+/);
-  const command = commandToken.split("@")[0].toLowerCase();
-  const arg = rest.join(" ").trim();
   const room = DEFAULT_ROOM;
 
   try {
+    if (message.document) {
+      await importCsvDocument(message, io, room);
+      return;
+    }
+    const [commandToken, ...rest] = message.text.trim().split(/\s+/);
+    const command = commandToken.split("@")[0].toLowerCase();
+    const arg = rest.join(" ").trim();
+
+    if (command === "/csv") {
+      await reply(chatId,
+        "📄 <b>CSV Import Format</b>\n\n" +
+        "Excel में ये header रखें:\n" +
+        "<code>cls,subject,chapter,hi,en,A,B,C,D,answer,explain</code>\n\n" +
+        "हर row में एक question रखें। Answer में A/B/C/D या 0/1/2/3 लिखें। Hindi या English में से कम-से-कम एक question जरूरी है।\n\n" +
+        "File को CSV UTF-8 (.csv) में save करके इसी chat में Document के रूप में भेजें।\n" +
+        "एक file में अधिकतम 1000 questions और 5 MB। पुराने questions सुरक्षित रहेंगे; exact duplicates skip होंगे।"
+      );
+      return;
+    }
+
     if (command === "/start" || command === "/help") {
       await reply(chatId,
         "🏫 <b>Smart Classroom Admin Bot</b>\n\n" +
         "/status — classroom status\n/next — अगला सवाल\n/prev — पिछला सवाल\n/answer — उत्तर दिखाएँ\n/hide — उत्तर छिपाएँ\n" +
-        "/list — questions की सूची\n/add — नया question जोड़ें\n/edit — question बदलें\n/delete ID — question हटाएँ\n\n" +
+        "/list — questions की सूची\n/add — नया question जोड़ें\n/csv — CSV import format\n/edit — question बदलें\n/delete ID — question हटाएँ\n\n" +
         "<b>/add format:</b>\n<code>/add Class 8 | Science | Light | प्रकाश क्या है? | What is light? | A | B | C | D | B | Explanation</code>\n" +
         "<b>/edit format:</b>\n<code>/edit ID | Class 8 | Science | Light | ...same fields...</code>"
       );
