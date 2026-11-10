@@ -544,7 +544,9 @@ async function configureWebhook() {
       { command: "list", description: "List questions" },
       { command: "add", description: "Add a question" },
       { command: "csv", description: "Preview and import CSV questions" },
-      { command: "csvtemplate", description: "Download sample CSV template" },\n      { command: "backup", description: "Export question bank JSON and CSV" },\n      { command: "restore", description: "Restore questions from JSON backup" },
+      { command: "csvtemplate", description: "Download sample CSV template" },
+      { command: "backup", description: "Export question bank JSON and CSV" },
+      { command: "restore", description: "Restore questions from JSON backup" },
       { command: "edit", description: "Edit a question" },
       { command: "delete", description: "Delete a question" }
     ]
