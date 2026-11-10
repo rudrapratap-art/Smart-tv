@@ -73,18 +73,37 @@ async function sendQuizQuestion(chatId, room, run) {
     text: String.fromCharCode(65 + index) + ". " + String(option).slice(0, 55),
     callback_data: "qz:" + quiz.id + ":" + index
   }]);
-  await telegram("sendMessage", {
-    chat_id: chatId,
-    text: "📝 <b>SMART CLASSROOM LIVE QUIZ</b>\n\n" +
-      "🎓 " + escapeHtml(q.cls) + " • " + escapeHtml(q.subject) + "\n" +
-      "📖 " + escapeHtml(q.chapter) + "\n" +
-      "🔢 प्रश्न " + (run.index + 1) + "/" + run.questions.length + "\n" +
-      "⏱️ समय: <b>" + QUIZ_QUESTION_SECONDS + " सेकंड</b>\n\n" +
-      "<b>" + escapeHtml(questionText) + "</b>\n\n" +
-      "नीचे दिए गए विकल्पों में से एक चुनें। हर विद्यार्थी का केवल पहला उत्तर स्वीकार होगा।",
-    parse_mode: "HTML",
+  const messageText = "📝 <b>SMART CLASSROOM LIVE QUIZ</b>\\n\\n" +
+    "🎓 " + escapeHtml(q.cls) + " • " + escapeHtml(q.subject) + "\\n" +
+    "📖 " + escapeHtml(q.chapter) + "\\n" +
+    "🔢 प्रश्न " + (run.index + 1) + "/" + run.questions.length + "\\n" +
+    "⏳ शेष समय: <b>" + QUIZ_QUESTION_SECONDS + " सेकंड</b>\\n\\n" +
+    "<b>" + escapeHtml(questionText) + "</b>\\n\\n" +
+    "नीचे दिए गए विकल्पों में से एक चुनें। हर विद्यार्थी का केवल पहला उत्तर स्वीकार होगा।";
+  const sentMessage = await telegram("sendMessage", {
+    chat_id: chatId, text: messageText, parse_mode: "HTML",
     reply_markup: { inline_keyboard: keyboard }
   });
+  run.messageId = sentMessage.message_id;
+  run.deadline = Date.now() + QUIZ_QUESTION_SECONDS * 1000;
+  if (run.countdown) clearInterval(run.countdown);
+  run.countdown = setInterval(async () => {
+    try {
+      if (activeQuizRuns.get(String(chatId)) !== run) return;
+      const remaining = Math.max(0, Math.ceil((run.deadline - Date.now()) / 1000));
+      const updatedText = messageText.replace(
+        /⏳ शेष समय: <b>\\d+ सेकंड<\\/b>/,
+        "⏳ शेष समय: <b>" + remaining + " सेकंड</b>"
+      );
+      await telegram("editMessageText", {
+        chat_id: chatId, message_id: run.messageId,
+        text: updatedText, parse_mode: "HTML",
+        reply_markup: { inline_keyboard: keyboard }
+      });
+    } catch (error) {
+      console.error("Quiz countdown update:", error.message);
+    }
+  }, 5000);
   run.timer = setTimeout(async () => {
     try {
       if (activeQuizRuns.get(String(chatId)) !== run) return;
@@ -101,6 +120,7 @@ async function sendQuizQuestion(chatId, room, run) {
 
 async function finishQuizRun(chatId, room, run, stopped = false) {
   if (run.timer) clearTimeout(run.timer);
+  if (run.countdown) clearInterval(run.countdown);
   await db.stopTelegramQuiz(room);
   activeQuizRuns.delete(String(chatId));
   const totals = new Map();
@@ -686,6 +706,7 @@ async function handleUpdate(update, io) {
       if (!candidates.length) throw new Error("पहले 🎓 Select Questions से Chapter चुनें या Question Bank में सवाल जोड़ें।");
       const previousRun = activeQuizRuns.get(String(chatId));
       if (previousRun?.timer) clearTimeout(previousRun.timer);
+      if (previousRun?.countdown) clearInterval(previousRun.countdown);
       const run = { room, questions: candidates, index: 0, quizIds: [], timer: null };
       activeQuizRuns.set(String(chatId), run);
       await sendQuizQuestion(chatId, room, run);
