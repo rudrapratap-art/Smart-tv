@@ -24,6 +24,49 @@ async function reply(chatId, text) {
   return telegram("sendMessage", { chat_id: chatId, text, parse_mode: "HTML", disable_web_page_preview: true });
 }
 
+const pendingCsvImports = new Map();
+
+async function sendCsvTemplate(chatId) {
+  const csv = "\uFEFFcls,subject,chapter,hi,en,A,B,C,D,answer,explain\r\n" +
+    'Class 8,Science,Light,"प्रकाश क्या है?","What is light?",Energy,Wave,Particle,All of these,D,"प्रकाश ऊर्जा का एक रूप है।"\r\n';
+  const form = new FormData();
+  form.append("chat_id", String(chatId));
+  form.append("document", new Blob([csv], { type: "text/csv;charset=utf-8" }), "smart-classroom-template.csv");
+  const response = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendDocument`, { method: "POST", body: form });
+  const result = await response.json();
+  if (!result.ok) throw new Error(result.description || "CSV template भेजने में समस्या हुई।");
+}
+
+async function commitCsvImport(chatId, incoming, io, room) {
+  const existing = await db.getQuestions();
+  const seen = new Set(existing.map(questionFingerprint));
+  const additions = incoming.filter(q => {
+    const key = questionFingerprint(q);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (!additions.length) {
+    await reply(chatId, "ℹ️ सभी " + incoming.length + " questions पहले से मौजूद हैं। कोई duplicate add नहीं किया गया।");
+    return;
+  }
+  const combined = [...existing, ...additions];
+  await db.saveQuestions(combined);
+  const state = await getState(room, combined);
+  state.questions = combined;
+  state.room = room;
+  if (!Number.isInteger(state.index) || state.index < 0 || state.index >= combined.length) state.index = 0;
+  await publish(io, room, state);
+  await reply(chatId,
+    "✅ <b>CSV Import पूरा हुआ!</b>\\n" +
+    "📥 Preview में जाँचे गए: " + incoming.length + "\\n" +
+    "➕ नए questions add: " + additions.length + "\\n" +
+    "⏭️ Duplicate skip: " + (incoming.length - additions.length) + "\\n" +
+    "📚 Total question bank: " + combined.length + "\\n\\n" +
+    "पुराने questions सुरक्षित रखे गए हैं।"
+  );
+}
+
 async function getState(room, questions) {
   const saved = await db.getClassroomState(room);
   return saved || { questions, index: 0, showAnswer: false, room, language: "both", progress: true };
@@ -129,7 +172,7 @@ function questionFingerprint(q) {
     .map(v => String(v || "").trim().toLowerCase()).join("|");
 }
 
-async function importCsvDocument(message, io, room) {
+async function previewCsvDocument(message) {
   const doc = message.document;
   const fileName = String(doc.file_name || "").toLowerCase();
   if (!fileName.endsWith(".csv")) throw new Error("कृपया केवल .csv file भेजें।");
@@ -140,37 +183,62 @@ async function importCsvDocument(message, io, room) {
   if (!response.ok) throw new Error("CSV download failed (" + response.status + ")");
   const bytes = Buffer.from(await response.arrayBuffer());
   if (bytes.length > 5 * 1024 * 1024) throw new Error("CSV file अधिकतम 5 MB की हो सकती है।");
-  const incoming = parseQuestionsCsv(bytes.toString("utf8").replace(/^\uFEFF/, ""));
-  const existing = await db.getQuestions();
-  const seen = new Set(existing.map(questionFingerprint));
-  const additions = incoming.filter(q => {
-    const key = questionFingerprint(q);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
+  const incoming = parseQuestionsCsv(bytes.toString("utf8").replace(/^\\uFEFF/, ""));
+  const chatId = String(message.chat.id);
+  pendingCsvImports.set(chatId, { questions: incoming, createdAt: Date.now() });
+  const sample = incoming.slice(0, 5).map((q, i) =>
+    (i + 1) + ". <b>" + escapeHtml(q.cls) + " / " + escapeHtml(q.subject) + "</b>\n" +
+    escapeHtml(q.hi || q.en).slice(0, 180) + "\n" +
+    "Answer: <b>" + ["A", "B", "C", "D"][q.answer] + "</b>"
+  ).join("\n\n");
+  await telegram("sendMessage", {
+    chat_id: message.chat.id,
+    text: "🔎 <b>CSV Preview</b>\n\n" +
+      "📄 File: " + escapeHtml(doc.file_name || "questions.csv") + "\n" +
+      "📚 कुल valid questions: <b>" + incoming.length + "</b>\n" +
+      "नीचे शुरुआती " + Math.min(5, incoming.length) + " सवालों का preview है:\n\n" + sample +
+      (incoming.length > 5 ? "\n\n…और " + (incoming.length - 5) + " questions" : "") +
+      "\n\nImport करने से पहले preview जाँच लें। Confirm करने पर पुराने questions सुरक्षित रहेंगे और duplicates skip होंगे।",
+    parse_mode: "HTML",
+    disable_web_page_preview: true,
+    reply_markup: { inline_keyboard: [[
+      { text: "✅ Confirm Import", callback_data: "csv_confirm" },
+      { text: "❌ Cancel", callback_data: "csv_cancel" }
+    ]] }
   });
-  if (!additions.length) {
-    await reply(message.chat.id, "ℹ️ CSV में " + incoming.length + " questions मिले, लेकिन सभी पहले से मौजूद हैं। कोई duplicate add नहीं किया गया।");
-    return;
-  }
-  const combined = [...existing, ...additions];
-  await db.saveQuestions(combined);
-  const state = await getState(room, combined);
-  state.questions = combined;
-  state.room = room;
-  if (!Number.isInteger(state.index) || state.index < 0 || state.index >= combined.length) state.index = 0;
-  await publish(io, room, state);
-  await reply(message.chat.id,
-    "✅ <b>CSV Import पूरा हुआ!</b>\n" +
-    "📥 CSV में मिले: " + incoming.length + "\n" +
-    "➕ नए questions add: " + additions.length + "\n" +
-    "⏭️ Duplicate skip: " + (incoming.length - additions.length) + "\n" +
-    "📚 Total question bank: " + combined.length + "\n\n" +
-    "पुराने questions सुरक्षित रखे गए हैं।"
-  );
 }
 
 async function handleUpdate(update, io) {
+  if (update?.callback_query) {
+    const callback = update.callback_query;
+    const chatId = callback.message?.chat?.id;
+    const senderId = String(callback.from?.id || "");
+    if (!ADMIN_ID || senderId !== ADMIN_ID) {
+      await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "Unauthorized", show_alert: true });
+      return;
+    }
+    const pending = pendingCsvImports.get(String(chatId));
+    if (callback.data === "csv_cancel") {
+      pendingCsvImports.delete(String(chatId));
+      await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "Import cancelled" });
+      await telegram("editMessageReplyMarkup", { chat_id: chatId, message_id: callback.message.message_id, reply_markup: { inline_keyboard: [] } });
+      await reply(chatId, "❌ CSV import cancel कर दिया गया। कोई question add नहीं हुआ।");
+      return;
+    }
+    if (callback.data === "csv_confirm") {
+      if (!pending || Date.now() - pending.createdAt > 15 * 60 * 1000) {
+        pendingCsvImports.delete(String(chatId));
+        await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "Preview expired. CSV फिर से भेजें।", show_alert: true });
+        return;
+      }
+      await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "Import शुरू हो रहा है…" });
+      pendingCsvImports.delete(String(chatId));
+      await telegram("editMessageReplyMarkup", { chat_id: chatId, message_id: callback.message.message_id, reply_markup: { inline_keyboard: [] } });
+      try { await commitCsvImport(chatId, pending.questions, io, DEFAULT_ROOM); }
+      catch (error) { console.error("CSV import:", error.message); await reply(chatId, "⚠️ Import failed: " + escapeHtml(error.message)); }
+    }
+    return;
+  }
   const message = update?.message;
   if (!message || (!message.text && !message.document)) return;
   const chatId = message.chat.id;
@@ -184,14 +252,14 @@ async function handleUpdate(update, io) {
 
   try {
     if (message.document) {
-      await importCsvDocument(message, io, room);
+      await previewCsvDocument(message);
       return;
     }
     const [commandToken, ...rest] = message.text.trim().split(/\s+/);
     const command = commandToken.split("@")[0].toLowerCase();
     const arg = rest.join(" ").trim();
 
-    if (command === "/csv") {
+    if (command === "/csvtemplate") {\n      await sendCsvTemplate(chatId);\n      return;\n    }\n\n    if (command === "/csv") {
       await reply(chatId,
         "📄 <b>CSV Import Format</b>\n\n" +
         "Excel में ये header रखें:\n" +
@@ -301,7 +369,7 @@ async function configureWebhook() {
   await telegram("setWebhook", {
     url: `${base}/telegram/webhook`,
     secret_token: secret,
-    allowed_updates: ["message"]
+    allowed_updates: ["message", "callback_query"]
   });
   await telegram("setMyCommands", {
     commands: [
@@ -313,7 +381,7 @@ async function configureWebhook() {
       { command: "hide", description: "Hide answer" },
       { command: "list", description: "List questions" },
       { command: "add", description: "Add a question" },
-      { command: "csv", description: "CSV import format" },
+      { command: "csv", description: "Preview and import CSV questions" },\n      { command: "csvtemplate", description: "Download sample CSV template" },
       { command: "edit", description: "Edit a question" },
       { command: "delete", description: "Delete a question" }
     ]
