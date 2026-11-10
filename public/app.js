@@ -141,7 +141,7 @@ $("saveSettings").onclick=()=>{
  if(adminKey)localStorage.setItem("sc_admin_key",adminKey);else localStorage.removeItem("sc_admin_key");
  broadcast();toast("Settings saved");
 };
-$("displayLanguage").value=localStorage.getItem("sc_language")||"both";$("questionOrder").value=localStorage.getItem("sc_order")||"normal";
+$("displayLanguage").value=localStorage.getItem("sc_language")||"both";$("questionOrder").value=localStorage.getItem("sc_order")||"normal";if($("adminApiKey"))$("adminApiKey").value=localStorage.getItem("sc_admin_key")||"";
 window.addEventListener("keydown",e=>{if(document.activeElement.matches("input,textarea,select"))return;if(e.key==="ArrowRight")move(1);if(e.key==="ArrowLeft")move(-1);if(e.key==="Enter"||e.key===" ") {showAnswer=!showAnswer;broadcast();}});
 renderList();renderController();bootstrapRemote();
 // Upgrade v2: CSV import/export and student performance
