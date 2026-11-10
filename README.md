@@ -33,9 +33,12 @@ Set these in Render Dashboard → your Web Service → Environment:
 - `/list` — list first 30 questions with IDs
 - `/csv` — show CSV import format and preview workflow
 - `/csvtemplate` — download a ready-to-edit sample CSV file
+- `/backup` — send the full question bank as JSON and CSV files
+- `/restore` — restore questions from a JSON backup after preview and confirmation
 - Send a `.csv` document to the bot to preview the first five questions, then Confirm or Cancel before importing. CSV headers: `cls,subject,chapter,hi,en,A,B,C,D,answer,explain`. Answer accepts A/B/C/D or 0/1/2/3. Hindi or English question text is required; explanation is optional. Maximum 1,000 questions and 5 MB per file. The import is not saved until Confirm is pressed (preview expires after 15 minutes). Existing questions are preserved and exact duplicate questions are skipped.
 - `/add Class 8 | Science | Chapter | Hindi question | English question | A | B | C | D | Answer(A-D) | Explanation`
 - `/edit QUESTION_ID | Class 8 | Science | Chapter | Hindi question | English question | A | B | C | D | Answer(A-D) | Explanation`
+- Send a `.json` backup created by `/backup` to preview and restore it. Restore appends missing questions, skips duplicates, and never deletes existing questions. Preview confirmation expires after 15 minutes.
 - `/delete QUESTION_ID`
 
 The bot is restricted to the Telegram user ID configured in `TELEGRAM_ADMIN_ID`. The webhook endpoint checks Telegram's secret-token header. The Supabase service key is used only on the Node server.
