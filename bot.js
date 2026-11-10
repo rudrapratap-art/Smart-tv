@@ -394,7 +394,9 @@ async function handleUpdate(update, io) {
 
   try {
     if (message.document) {
-      await previewCsvDocument(message);
+      const name = String(message.document.file_name || "").toLowerCase();
+      if (name.endsWith(".json")) await previewRestoreDocument(message);
+      else await previewCsvDocument(message);
       return;
     }
     const [commandToken, ...rest] = message.text.trim().split(/\s+/);
