@@ -434,11 +434,11 @@ async function handleUpdate(update, io) {
         });
         // Refresh the shared group message with a live response count.
         const responses = await db.getTelegramQuizResponses(quizId);
-        const baseText = String(callback.message?.text || "").replace(/\\n\\n📊 जवाब मिले: \\d+$/, "");
+        const baseText = String(callback.message?.text || "").replace(/\n\n📊 जवाब मिले: \\d+$/, "");
         await telegram("editMessageText", {
           chat_id: chatId,
           message_id: callback.message.message_id,
-          text: baseText + "\\n\\n📊 जवाब मिले: " + responses.length,
+          text: baseText + "\n\n📊 जवाब मिले: " + responses.length,
           parse_mode: "HTML",
           reply_markup: callback.message.reply_markup
         });
@@ -619,10 +619,10 @@ async function handleUpdate(update, io) {
       }]);
       await telegram("sendMessage", {
         chat_id: chatId,
-        text: "📝 <b>SMART CLASSROOM LIVE QUIZ</b>\\n\\n" +
-          "🎓 " + escapeHtml(q.cls) + " • " + escapeHtml(q.subject) + "\\n" +
-          "📖 " + escapeHtml(q.chapter) + "\\n\\n" +
-          "<b>" + escapeHtml(questionText) + "</b>\\n\\n" +
+        text: "📝 <b>SMART CLASSROOM LIVE QUIZ</b>\n\n" +
+          "🎓 " + escapeHtml(q.cls) + " • " + escapeHtml(q.subject) + "\n" +
+          "📖 " + escapeHtml(q.chapter) + "\n\n" +
+          "<b>" + escapeHtml(questionText) + "</b>\n\n" +
           "नीचे दिए गए विकल्पों में से एक चुनें। हर विद्यार्थी का केवल पहला उत्तर स्वीकार होगा।",
         parse_mode: "HTML",
         reply_markup: { inline_keyboard: keyboard }
@@ -646,9 +646,9 @@ async function handleUpdate(update, io) {
       const correct = responses.filter(x => x.is_correct).length;
       await telegram("sendMessage", {
         chat_id: chatId,
-        text: "⏹ <b>Quiz बंद हो गया!</b>\\n" +
-          "कुल उत्तर: <b>" + responses.length + "</b>\\n" +
-          "सही उत्तर: <b>" + correct + "</b>\\n" +
+        text: "⏹ <b>Quiz बंद हो गया!</b>\n" +
+          "कुल उत्तर: <b>" + responses.length + "</b>\n" +
+          "सही उत्तर: <b>" + correct + "</b>\n" +
           "सही विकल्प: <b>" + String.fromCharCode(65 + Number(activeQuiz.correct_answer)) + "</b>",
         parse_mode: "HTML"
       });
