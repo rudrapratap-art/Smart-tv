@@ -31,8 +31,9 @@ Set these in Render Dashboard → your Web Service → Environment:
 - `/next`, `/prev` — navigate
 - `/answer`, `/hide` — reveal/hide answer
 - `/list` — list first 30 questions with IDs
-- `/csv` — show CSV import format
-- Send a `.csv` document to the bot to bulk-import questions. CSV headers: `cls,subject,chapter,hi,en,A,B,C,D,answer,explain`. Answer accepts A/B/C/D or 0/1/2/3. Hindi or English question text is required; explanation is optional. Maximum 1,000 questions and 5 MB per file. Existing questions are preserved and exact duplicate questions are skipped.
+- `/csv` — show CSV import format and preview workflow
+- `/csvtemplate` — download a ready-to-edit sample CSV file
+- Send a `.csv` document to the bot to preview the first five questions, then Confirm or Cancel before importing. CSV headers: `cls,subject,chapter,hi,en,A,B,C,D,answer,explain`. Answer accepts A/B/C/D or 0/1/2/3. Hindi or English question text is required; explanation is optional. Maximum 1,000 questions and 5 MB per file. The import is not saved until Confirm is pressed (preview expires after 15 minutes). Existing questions are preserved and exact duplicate questions are skipped.
 - `/add Class 8 | Science | Chapter | Hindi question | English question | A | B | C | D | Answer(A-D) | Explanation`
 - `/edit QUESTION_ID | Class 8 | Science | Chapter | Hindi question | English question | A | B | C | D | Answer(A-D) | Explanation`
 - `/delete QUESTION_ID`
