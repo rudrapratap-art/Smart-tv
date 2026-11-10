@@ -140,10 +140,10 @@ async function previewRestoreDocument(message) {
   pendingRestores.set(chatId, { questions, createdAt: Date.now() });
   await telegram("sendMessage", {
     chat_id: message.chat.id,
-    text: "♻️ <b>Backup Restore Preview</b>\\n\\n" +
-      "📄 File: " + escapeHtml(doc.file_name || "backup.json") + "\\n" +
-      "📚 Backup questions: <b>" + questions.length + "</b>\\n" +
-      "Restore करने पर backup के questions मौजूदा question bank में जोड़े जाएँगे। Existing questions delete/overwrite नहीं होंगे और duplicate questions skip होंगे।\\n\\n" +
+    text: "♻️ <b>Backup Restore Preview</b>\n\n" +
+      "📄 File: " + escapeHtml(doc.file_name || "backup.json") + "\n" +
+      "📚 Backup questions: <b>" + questions.length + "</b>\n" +
+      "Restore करने पर backup के questions मौजूदा question bank में जोड़े जाएँगे। Existing questions delete/overwrite नहीं होंगे और duplicate questions skip होंगे।\n\n" +
       "क्या restore करना है?",
     parse_mode: "HTML",
     reply_markup: { inline_keyboard: [[
@@ -175,7 +175,7 @@ async function commitRestore(chatId, incoming, io, room) {
   state.questions = combined;
   if (!Number.isInteger(state.index) || state.index < 0 || state.index >= combined.length) state.index = 0;
   await publish(io, room, state);
-  await reply(chatId, `✅ Restore पूरा हुआ!\\nBackup questions: ${incoming.length}\\nनए questions restore: ${additions.length}\\nDuplicate skip: ${incoming.length-additions.length}\\nTotal question bank: ${combined.length}\\nपुराने questions सुरक्षित हैं।`);
+  await reply(chatId, `✅ Restore पूरा हुआ!\nBackup questions: ${incoming.length}\nनए questions restore: ${additions.length}\nDuplicate skip: ${incoming.length-additions.length}\nTotal question bank: ${combined.length}\nपुराने questions सुरक्षित हैं।`);
 }
 
 
@@ -211,8 +211,8 @@ async function commitCsvImport(chatId, incoming, io, room) {
   if (!Number.isInteger(state.index) || state.index < 0 || state.index >= combined.length) state.index = 0;
   await publish(io, room, state);
   await reply(chatId,
-    "✅ <b>CSV Import पूरा हुआ!</b>\\n" +
-    "📥 Preview में जाँचे गए: " + incoming.length + "\\n" +
+    "✅ <b>CSV Import पूरा हुआ!</b>\n" +
+    "📥 Preview में जाँचे गए: " + incoming.length + "\n" +
     "➕ नए questions add: " + additions.length + "\n" +
     "⏭️ Duplicate skip: " + (incoming.length - additions.length) + "\n" +
     "📚 Total question bank: " + combined.length + "\n\n" +
@@ -240,21 +240,21 @@ async function showClassSelection(chatId, questions) {
   const classes = [...new Set(questions.map(q => String(q.cls || "").trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
   if (!classes.length) return reply(chatId, "Question Bank खाली है। पहले questions add करें।");
   selectionSessions.set(String(chatId), { stage: "class", filter: {} });
-  await reply(chatId, "🎓 <b>Select Class</b>\\nअपनी class चुनें:", optionKeyboard("🏫 ", classes));
+  await reply(chatId, "🎓 <b>Select Class</b>\nअपनी class चुनें:", optionKeyboard("🏫 ", classes));
 }
 
 async function showSubjectSelection(chatId, questions, filter) {
   const subjects = [...new Set(filterQuestionBank(questions, { cls: filter.cls }).map(q => String(q.subject || "").trim()).filter(Boolean))].sort();
   if (!subjects.length) return reply(chatId, "इस Class में कोई Subject नहीं मिला।", mainKeyboard);
   selectionSessions.set(String(chatId), { stage: "subject", filter });
-  await reply(chatId, "📘 <b>Select Subject</b>\\nClass: " + escapeHtml(filter.cls), optionKeyboard("📘 ", subjects));
+  await reply(chatId, "📘 <b>Select Subject</b>\nClass: " + escapeHtml(filter.cls), optionKeyboard("📘 ", subjects));
 }
 
 async function showChapterSelection(chatId, questions, filter) {
   const chapters = [...new Set(filterQuestionBank(questions, { cls: filter.cls, subject: filter.subject }).map(q => String(q.chapter || "").trim()).filter(Boolean))].sort();
   if (!chapters.length) return reply(chatId, "इस Subject में कोई Chapter नहीं मिला।", mainKeyboard);
   selectionSessions.set(String(chatId), { stage: "chapter", filter });
-  await reply(chatId, "📖 <b>Select Chapter</b>\\n" + escapeHtml(filter.cls + " / " + filter.subject), optionKeyboard("📖 ", chapters));
+  await reply(chatId, "📖 <b>Select Chapter</b>\n" + escapeHtml(filter.cls + " / " + filter.subject), optionKeyboard("📖 ", chapters));
 }
 
 async function getState(room, questions) {
@@ -554,11 +554,11 @@ async function handleUpdate(update, io) {
       return;
     }
     if (command === "/secondmenu") {
-      await reply(chatId, "📂 <b>Question Bank Menu</b>\\nBackup, Restore और CSV tools चुनें।", secondKeyboard);
+      await reply(chatId, "📂 <b>Question Bank Menu</b>\nBackup, Restore और CSV tools चुनें।", secondKeyboard);
       return;
     }
     if (command === "/mainmenu") {
-      await reply(chatId, "🏠 <b>Main Menu</b>\\nClassroom controls चुनें।", mainKeyboard);
+      await reply(chatId, "🏠 <b>Main Menu</b>\nClassroom controls चुनें।", mainKeyboard);
       return;
     }
 
@@ -589,10 +589,10 @@ async function handleUpdate(update, io) {
       saved.showAnswer = false;
       selectionSessions.delete(String(chatId));
       await publish(io, room, saved);
-      await reply(chatId, "✅ <b>Chapter Selected!</b>\\n" +
-        "Class: " + escapeHtml(selection.filter.cls) + "\\nSubject: " + escapeHtml(selection.filter.subject) +
-        "\\nChapter: " + escapeHtml(chapter) + "\\nQuestions: <b>" + filtered.length +
-        "</b>\\nअब Next / Previous से सवाल चलाएँ।", mainKeyboard);
+      await reply(chatId, "✅ <b>Chapter Selected!</b>\n" +
+        "Class: " + escapeHtml(selection.filter.cls) + "\nSubject: " + escapeHtml(selection.filter.subject) +
+        "\nChapter: " + escapeHtml(chapter) + "\nQuestions: <b>" + filtered.length +
+        "</b>\nअब Next / Previous से सवाल चलाएँ।", mainKeyboard);
       return;
     }
     if (command === "/quiz") {
