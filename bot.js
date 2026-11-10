@@ -347,15 +347,12 @@ async function handleUpdate(update, io) {
       return;
     }
     if (callback.data === "restore_confirm") {
-      if (!pending || Date.now() - pending.createdAt > 15 * 60 * 1000) {
-        const restore = pendingRestores.get(String(chatId));
-        if (!restore || Date.now() - restore.createdAt > 15 * 60 * 1000) {
-          pendingRestores.delete(String(chatId));
-          await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "Preview expired. Backup फिर से भेजें।", show_alert: true });
-          return;
-        }
-      }
       const restore = pendingRestores.get(String(chatId));
+      if (!restore || Date.now() - restore.createdAt > 15 * 60 * 1000) {
+        pendingRestores.delete(String(chatId));
+        await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "Preview expired. Backup फिर से भेजें।", show_alert: true });
+        return;
+      }
       await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "Restore शुरू हो रहा है…" });
       pendingRestores.delete(String(chatId));
       await telegram("editMessageReplyMarkup", { chat_id: chatId, message_id: callback.message.message_id, reply_markup: { inline_keyboard: [] } });
