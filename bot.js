@@ -259,14 +259,19 @@ async function handleUpdate(update, io) {
     const command = commandToken.split("@")[0].toLowerCase();
     const arg = rest.join(" ").trim();
 
-    if (command === "/csvtemplate") {\n      await sendCsvTemplate(chatId);\n      return;\n    }\n\n    if (command === "/csv") {
+    if (command === "/csvtemplate") {
+      await sendCsvTemplate(chatId);
+      return;
+    }
+
+    if (command === "/csv") {
       await reply(chatId,
         "📄 <b>CSV Import Format</b>\n\n" +
         "Excel में ये header रखें:\n" +
         "<code>cls,subject,chapter,hi,en,A,B,C,D,answer,explain</code>\n\n" +
         "हर row में एक question रखें। Answer में A/B/C/D या 0/1/2/3 लिखें। Hindi या English में से कम-से-कम एक question जरूरी है।\n\n" +
-        "File को CSV UTF-8 (.csv) में save करके इसी chat में Document के रूप में भेजें।\n" +
-        "एक file में अधिकतम 1000 questions और 5 MB। पुराने questions सुरक्षित रहेंगे; exact duplicates skip होंगे।"
+        "File को CSV UTF-8 (.csv) में save करके इसी chat में Document के रूप में भेजें। पहले preview आएगा, फिर Confirm/Cancel चुनें।\n" +
+        "एक file में अधिकतम 1000 questions और 5 MB। पुराने questions सुरक्षित रहेंगे; exact duplicates skip होंगे।\n/csvtemplate से sample CSV डाउनलोड करें।"
       );
       return;
     }
@@ -381,7 +386,8 @@ async function configureWebhook() {
       { command: "hide", description: "Hide answer" },
       { command: "list", description: "List questions" },
       { command: "add", description: "Add a question" },
-      { command: "csv", description: "Preview and import CSV questions" },\n      { command: "csvtemplate", description: "Download sample CSV template" },
+      { command: "csv", description: "Preview and import CSV questions" },
+      { command: "csvtemplate", description: "Download sample CSV template" },
       { command: "edit", description: "Edit a question" },
       { command: "delete", description: "Delete a question" }
     ]
