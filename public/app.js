@@ -54,6 +54,7 @@ async function bootstrapRemote(){
 }
 function showPage(id){document.querySelectorAll(".page").forEach(p=>p.classList.toggle("active",p.id===id));document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active",b.dataset.page===id));if(id==="controller")renderController()}
 document.querySelectorAll("[data-page]").forEach(b=>b.addEventListener("click",()=>showPage(b.dataset.page)));
+if($("quickAi"))$("quickAi").onclick=()=>{showPage("bank");$("aiGeneratorSection")?.scrollIntoView({behavior:"smooth",block:"start"});};
 function move(n){
  const list=getControllerQuestions();
  if(n>0&&$("questionOrder")?.value==="random"&&list.length>1){let next=index;while(next===index)next=Math.floor(Math.random()*list.length);index=next}
