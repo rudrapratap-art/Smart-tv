@@ -25,6 +25,127 @@ async function reply(chatId, text) {
 }
 
 const pendingCsvImports = new Map();
+const pendingRestores = new Map();
+
+function csvCell(value) {
+  const text = String(value ?? "");
+  return /[",\\r\\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
+}
+
+function questionsToCsv(questions) {
+  const headers = ["cls","subject","chapter","hi","en","A","B","C","D","answer","explain"];
+  const lines = [headers.join(",")];
+  for (const q of questions) {
+    const opts = Array.isArray(q.opts) ? q.opts : [];
+    lines.push([
+      q.cls, q.subject, q.chapter, q.hi, q.en,
+      opts[0], opts[1], opts[2], opts[3],
+      ["A","B","C","D"][Number(q.answer)] || "A", q.explain
+    ].map(csvCell).join(","));
+  }
+  return "\uFEFF" + lines.join("\r\n") + "\r\n";
+}
+
+async function sendDocument(chatId, filename, content, contentType) {
+  const form = new FormData();
+  form.append("chat_id", String(chatId));
+  form.append("document", new Blob([content], { type: contentType }), filename);
+  const response = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendDocument`, { method: "POST", body: form });
+  const result = await response.json();
+  if (!result.ok) throw new Error(result.description || "Telegram पर backup भेजने में समस्या हुई।");
+}
+
+async function backupCommand(chatId) {
+  const questions = await db.getQuestions();
+  const backup = {
+    app: "Smart Classroom",
+    formatVersion: 1,
+    exportedAt: new Date().toISOString(),
+    totalQuestions: questions.length,
+    questions
+  };
+  const stamp = new Date().toISOString().slice(0,10);
+  await sendDocument(chatId, `smart-classroom-backup-${stamp}.json`, JSON.stringify(backup, null, 2), "application/json");
+  await sendDocument(chatId, `smart-classroom-questions-${stamp}.csv`, questionsToCsv(questions), "text/csv;charset=utf-8");
+  await reply(chatId, `✅ Backup तैयार है। कुल ${questions.length} questions का JSON और CSV दोनों backup भेज दिया गया है।`);
+}
+
+function parseRestoreBackup(raw) {
+  let data;
+  try { data = JSON.parse(raw.replace(/^\\uFEFF/, "")); }
+  catch { throw new Error("यह valid JSON backup नहीं है। /backup से बनाया गया JSON file भेजें।"); }
+  const source = Array.isArray(data) ? data : data?.questions;
+  if (!Array.isArray(source) || source.length > 10000) throw new Error("Backup format गलत है या 10,000 से अधिक questions हैं।");
+  if (!source.length) throw new Error("Backup में कोई question नहीं है।");
+  const questions = source.map((q, i) => {
+    const opts = Array.isArray(q.opts) ? q.opts : Array.isArray(q.options) ? q.options : [];
+    const answer = Number(q.answer);
+    if (!q || !String(q.cls || "").trim() || !String(q.subject || "").trim() ||
+        !String(q.chapter || "").trim() || (!String(q.hi || "").trim() && !String(q.en || "").trim()) ||
+        opts.length !== 4 || !opts.every(v => String(v ?? "").trim()) ||
+        !Number.isInteger(answer) || answer < 0 || answer > 3) {
+      throw new Error(`Backup में question ${i + 1} का data invalid है। कोई data restore नहीं किया गया।`);
+    }
+    return {
+      id: String(q.id || `restore_${Date.now()}_${i}_${Math.floor(Math.random()*100000)}`),
+      cls: String(q.cls), subject: String(q.subject), chapter: String(q.chapter),
+      hi: String(q.hi || ""), en: String(q.en || ""), opts: opts.map(String),
+      answer, explain: String(q.explain || q.explanation || "")
+    };
+  });
+  return questions;
+}
+
+async function previewRestoreDocument(message) {
+  const doc = message.document;
+  const filename = String(doc.file_name || "").toLowerCase();
+  if (!filename.endsWith(".json")) throw new Error("Restore के लिए /backup से मिला .json file भेजें। CSV के लिए /csv workflow इस्तेमाल करें।");
+  if (Number(doc.file_size || 0) > 10 * 1024 * 1024) throw new Error("JSON backup अधिकतम 10 MB की हो सकती है।");
+  const info = await telegram("getFile", { file_id: doc.file_id });
+  const response = await fetch("https://api.telegram.org/file/bot" + BOT_TOKEN + "/" + info.file_path);
+  if (!response.ok) throw new Error("Backup download failed (" + response.status + ")");
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.length > 10 * 1024 * 1024) throw new Error("JSON backup अधिकतम 10 MB की हो सकती है।");
+  const questions = parseRestoreBackup(bytes.toString("utf8"));
+  const chatId = String(message.chat.id);
+  pendingRestores.set(chatId, { questions, createdAt: Date.now() });
+  await telegram("sendMessage", {
+    chat_id: message.chat.id,
+    text: "♻️ <b>Backup Restore Preview</b>\\n\\n" +
+      "📄 File: " + escapeHtml(doc.file_name || "backup.json") + "\\n" +
+      "📚 Backup questions: <b>" + questions.length + "</b>\\n" +
+      "Restore करने पर backup के questions मौजूदा question bank में जोड़े जाएँगे। Existing questions delete/overwrite नहीं होंगे और duplicate questions skip होंगे।\\n\\n" +
+      "क्या restore करना है?",
+    parse_mode: "HTML",
+    reply_markup: { inline_keyboard: [[
+      { text: "✅ Confirm Restore", callback_data: "restore_confirm" },
+      { text: "❌ Cancel", callback_data: "restore_cancel" }
+    ]] }
+  });
+}
+
+async function commitRestore(chatId, incoming, io, room) {
+  const existing = await db.getQuestions();
+  const seen = new Set(existing.map(questionFingerprint));
+  const additions = incoming.filter(q => {
+    const key = questionFingerprint(q);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (!additions.length) {
+    await reply(chatId, "ℹ️ Backup के सभी questions पहले से मौजूद हैं। कोई बदलाव नहीं किया गया।");
+    return;
+  }
+  const combined = [...existing, ...additions];
+  await db.saveQuestions(combined);
+  const state = await getState(room, combined);
+  state.questions = combined;
+  if (!Number.isInteger(state.index) || state.index < 0 || state.index >= combined.length) state.index = 0;
+  await publish(io, room, state);
+  await reply(chatId, `✅ Restore पूरा हुआ!\\nBackup questions: ${incoming.length}\\nनए questions restore: ${additions.length}\\nDuplicate skip: ${incoming.length-additions.length}\\nTotal question bank: ${combined.length}\\nपुराने questions सुरक्षित हैं।`);
+}
+
 
 async function sendCsvTemplate(chatId) {
   const csv = "\uFEFFcls,subject,chapter,hi,en,A,B,C,D,answer,explain\r\n" +
@@ -218,6 +339,30 @@ async function handleUpdate(update, io) {
       return;
     }
     const pending = pendingCsvImports.get(String(chatId));
+    if (callback.data === "restore_cancel") {
+      pendingRestores.delete(String(chatId));
+      await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "Restore cancelled" });
+      await telegram("editMessageReplyMarkup", { chat_id: chatId, message_id: callback.message.message_id, reply_markup: { inline_keyboard: [] } });
+      await reply(chatId, "❌ Restore cancel कर दिया गया। कोई बदलाव नहीं हुआ।");
+      return;
+    }
+    if (callback.data === "restore_confirm") {
+      if (!pending || Date.now() - pending.createdAt > 15 * 60 * 1000) {
+        const restore = pendingRestores.get(String(chatId));
+        if (!restore || Date.now() - restore.createdAt > 15 * 60 * 1000) {
+          pendingRestores.delete(String(chatId));
+          await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "Preview expired. Backup फिर से भेजें।", show_alert: true });
+          return;
+        }
+      }
+      const restore = pendingRestores.get(String(chatId));
+      await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "Restore शुरू हो रहा है…" });
+      pendingRestores.delete(String(chatId));
+      await telegram("editMessageReplyMarkup", { chat_id: chatId, message_id: callback.message.message_id, reply_markup: { inline_keyboard: [] } });
+      try { await commitRestore(chatId, restore.questions, io, DEFAULT_ROOM); }
+      catch (error) { console.error("Backup restore:", error.message); await reply(chatId, "⚠️ Restore failed: " + escapeHtml(error.message)); }
+      return;
+    }
     if (callback.data === "csv_cancel") {
       pendingCsvImports.delete(String(chatId));
       await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "Import cancelled" });
@@ -258,6 +403,16 @@ async function handleUpdate(update, io) {
     const [commandToken, ...rest] = message.text.trim().split(/\s+/);
     const command = commandToken.split("@")[0].toLowerCase();
     const arg = rest.join(" ").trim();
+
+    if (command === "/backup") {
+      await backupCommand(chatId);
+      return;
+    }
+
+    if (command === "/restore") {
+      await reply(chatId, "♻️ Restore करने के लिए /backup से मिला JSON backup इसी chat में Document के रूप में भेजें। Preview देखकर Confirm/Cancel करें। Restore existing questions को delete नहीं करता।");
+      return;
+    }
 
     if (command === "/csvtemplate") {
       await sendCsvTemplate(chatId);
@@ -387,7 +542,7 @@ async function configureWebhook() {
       { command: "list", description: "List questions" },
       { command: "add", description: "Add a question" },
       { command: "csv", description: "Preview and import CSV questions" },
-      { command: "csvtemplate", description: "Download sample CSV template" },
+      { command: "csvtemplate", description: "Download sample CSV template" },\n      { command: "backup", description: "Export question bank JSON and CSV" },\n      { command: "restore", description: "Restore questions from JSON backup" },
       { command: "edit", description: "Edit a question" },
       { command: "delete", description: "Delete a question" }
     ]
