@@ -29,7 +29,7 @@ const pendingRestores = new Map();
 
 function csvCell(value) {
   const text = String(value ?? "");
-  return /[",\\r\\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
+  return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
 }
 
 function questionsToCsv(questions) {
@@ -72,7 +72,7 @@ async function backupCommand(chatId) {
 
 function parseRestoreBackup(raw) {
   let data;
-  try { data = JSON.parse(raw.replace(/^\\uFEFF/, "")); }
+  try { data = JSON.parse(raw.replace(/^\uFEFF/, "")); }
   catch { throw new Error("यह valid JSON backup नहीं है। /backup से बनाया गया JSON file भेजें।"); }
   const source = Array.isArray(data) ? data : data?.questions;
   if (!Array.isArray(source) || source.length > 10000) throw new Error("Backup format गलत है या 10,000 से अधिक questions हैं।");
