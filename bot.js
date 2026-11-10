@@ -886,7 +886,10 @@ async function handleUpdate(update, io) {
       state.questions = activeQuestions;
       await publish(io, room, state);
       const current = activeQuestions[state.index];
-      await reply(chatId, `✅ TV updated: ${state.index + 1}/${activeQuestions.length}\n${escapeHtml(current.hi || current.en)}`);
+      const answerText = command === "/answer"
+        ? `\n\n✅ <b>Correct Answer: ${["A", "B", "C", "D"][Number(current.answer)] || "—"}. ${escapeHtml(current.opts?.[Number(current.answer)] || "")}</b>${current.explain ? `\n💡 ${escapeHtml(current.explain)}` : ""}`
+        : "";
+      await reply(chatId, `✅ TV updated: ${state.index + 1}/${activeQuestions.length}\n${escapeHtml(current.hi || current.en)}${answerText}`);
       return;
     }
 
