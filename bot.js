@@ -75,11 +75,11 @@ async function sendQuizQuestion(chatId, room, run) {
     callback_data: "qz:" + quiz.id + ":" + index
   }]);
   run.deadline = Date.now() + QUIZ_QUESTION_SECONDS * 1000;
-  run.messageText = "📝 <b>SMART CLASSROOM LIVE QUIZ</b>\\n\\n" +
-    "🎓 " + escapeHtml(q.cls) + " • " + escapeHtml(q.subject) + "\\n" +
-    "📖 " + escapeHtml(q.chapter) + "\\n" +
-    "🔢 प्रश्न " + (run.index + 1) + "/" + run.questions.length + "\\n" +
-    "⏳ शेष समय: " + QUIZ_QUESTION_SECONDS + " सेकंड\\n\\n" +
+  run.messageText = "📝 <b>SMART CLASSROOM LIVE QUIZ</b>\n\n" +
+    "🎓 " + escapeHtml(q.cls) + " • " + escapeHtml(q.subject) + "\n" +
+    "📖 " + escapeHtml(q.chapter) + "\n" +
+    "🔢 प्रश्न " + (run.index + 1) + "/" + run.questions.length + "\n" +
+    "\n\n" +
     "<b>" + escapeHtml(questionText) + "</b>";
   const sentMessage = await telegram("sendMessage", {
     chat_id: chatId, text: run.messageText, parse_mode: "HTML",
@@ -90,8 +90,8 @@ async function sendQuizQuestion(chatId, room, run) {
     if (run.stopped || activeQuizRuns.get(String(chatId)) !== run) return;
     const remaining = Math.max(0, Math.ceil((run.deadline - Date.now()) / 1000));
     const responses = await db.getTelegramQuizResponses(quiz.id).catch(() => []);
-    const text = run.messageText + "\\n\\n⏳ शेष समय: " + remaining + " सेकंड" +
-      "\\n📊 जवाब मिले: " + responses.length;
+    const text = run.messageText + "\n\n⏳ शेष समय: " + remaining + " सेकंड" +
+      "\n📊 जवाब मिले: " + responses.length;
     await telegram("editMessageText", {
       chat_id: chatId, message_id: sentMessage.message_id,
       text, parse_mode: "HTML", reply_markup: { inline_keyboard: keyboard }
@@ -143,17 +143,17 @@ async function finishQuizRun(chatId, room, run, stopped = false) {
     .sort((a,b) => b.correct-a.correct || b.answered-a.answered)
     .slice(0,10);
   const rankingText = leaderboard.length
-    ? "\\n\\n🏆 <b>Top Students</b>\\n" + leaderboard.map((x,i) =>
+    ? "\n\n🏆 <b>Top Students</b>\n" + leaderboard.map((x,i) =>
         (i+1) + ". " + escapeHtml(x.name) + " — <b>" + x.correct + "/" + run.questions.length + "</b>"
-      ).join("\\n")
-    : "\\n\\nअभी किसी विद्यार्थी ने उत्तर नहीं दिया।";
+      ).join("\n")
+    : "\n\nअभी किसी विद्यार्थी ने उत्तर नहीं दिया।";
   await telegram("sendMessage", {
     chat_id: chatId,
     text: (stopped ? "⏹ <b>Quiz रोक दिया गया!</b>" : "🎉 <b>Quiz पूरा हुआ!</b>") +
-      "\\n📚 कुल प्रश्न: <b>" + run.questions.length + "</b>" +
-      "\\n👥 कुल उत्तर: <b>" + totalAnswers + "</b>" +
-      "\\n✅ सही उत्तर: <b>" + correctAnswers + "</b>" +
-      "\\n❌ गलत उत्तर: <b>" + (totalAnswers-correctAnswers) + "</b>" + rankingText,
+      "\n📚 कुल प्रश्न: <b>" + run.questions.length + "</b>" +
+      "\n👥 कुल उत्तर: <b>" + totalAnswers + "</b>" +
+      "\n✅ सही उत्तर: <b>" + correctAnswers + "</b>" +
+      "\n❌ गलत उत्तर: <b>" + (totalAnswers-correctAnswers) + "</b>" + rankingText,
     parse_mode: "HTML"
   });
 }
@@ -535,7 +535,7 @@ async function handleUpdate(update, io) {
         });
         // Refresh the shared group message with a live response count.
         const responses = await db.getTelegramQuizResponses(quizId);
-        const baseText = String(callback.message?.text || "").replace(/\n\n📊 जवाब मिले: \\d+$/, "");
+        const baseText = String(callback.message?.text || "").replace(/\n\n📊 जवाब मिले: \d+$/, "");
         await telegram("editMessageText", {
           chat_id: chatId,
           message_id: callback.message.message_id,
