@@ -20,8 +20,34 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 }
 
-async function reply(chatId, text) {
-  return telegram("sendMessage", { chat_id: chatId, text, parse_mode: "HTML", disable_web_page_preview: true });
+const mainKeyboard = {
+  keyboard: [
+    [{ text: "🏠 Home" }, { text: "📂 Second menu" }],
+    [{ text: "▶️ Next" }, { text: "◀️ Previous" }],
+    [{ text: "👁 Show Answer" }, { text: "🙈 Hide Answer" }]
+  ],
+  resize_keyboard: true,
+  is_persistent: true,
+  input_field_placeholder: "Choose a classroom action…"
+};
+
+const secondKeyboard = {
+  keyboard: [
+    [{ text: "💾 Backup" }, { text: "♻️ Restore" }],
+    [{ text: "📄 CSV Help" }, { text: "📥 CSV Template" }],
+    [{ text: "⬅️ Main menu" }]
+  ],
+  resize_keyboard: true,
+  is_persistent: true,
+  input_field_placeholder: "Choose a question bank action…"
+};
+
+async function reply(chatId, text, keyboard = mainKeyboard) {
+  return telegram("sendMessage", {
+    chat_id: chatId, text, parse_mode: "HTML",
+    disable_web_page_preview: true,
+    reply_markup: keyboard
+  });
 }
 
 const pendingCsvImports = new Map();
@@ -402,9 +428,33 @@ async function handleUpdate(update, io) {
       else await previewCsvDocument(message);
       return;
     }
-    const [commandToken, ...rest] = message.text.trim().split(/\s+/);
+    const buttonText = message.text.trim();
+    const buttonCommands = {
+      "🏠 Home": "/start",
+      "▶️ Next": "/next",
+      "◀️ Previous": "/prev",
+      "👁 Show Answer": "/answer",
+      "🙈 Hide Answer": "/hide",
+      "💾 Backup": "/backup",
+      "♻️ Restore": "/restore",
+      "📄 CSV Help": "/csv",
+      "📥 CSV Template": "/csvtemplate",
+      "⬅️ Main menu": "/mainmenu",
+      "📂 Second menu": "/secondmenu"
+    };
+    const normalizedText = buttonCommands[buttonText] || buttonText;
+    const [commandToken, ...rest] = normalizedText.split(/\s+/);
     const command = commandToken.split("@")[0].toLowerCase();
     const arg = rest.join(" ").trim();
+
+    if (command === "/secondmenu") {
+      await reply(chatId, "📂 <b>Question Bank Menu</b>\\nBackup, Restore और CSV tools चुनें।", secondKeyboard);
+      return;
+    }
+    if (command === "/mainmenu") {
+      await reply(chatId, "🏠 <b>Main Menu</b>\\nClassroom controls चुनें।", mainKeyboard);
+      return;
+    }
 
     if (command === "/backup") {
       await backupCommand(chatId);
