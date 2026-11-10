@@ -73,7 +73,6 @@ async function sendQuizQuestion(chatId, room, run) {
     text: String.fromCharCode(65 + index) + ". " + String(option).slice(0, 55),
     callback_data: "qz:" + quiz.id + ":" + index
   }]);
-  keyboard.push([{ text: "➡️ Next Question (Teacher)", callback_data: "qznext:" + quiz.id }]);
   const messageText = "📝 <b>SMART CLASSROOM LIVE QUIZ</b>\\n\\n" +
     "🎓 " + escapeHtml(q.cls) + " • " + escapeHtml(q.subject) + "\\n" +
     "📖 " + escapeHtml(q.chapter) + "\\n" +
@@ -86,6 +85,15 @@ async function sendQuizQuestion(chatId, room, run) {
     reply_markup: { inline_keyboard: keyboard }
   });
   run.messageId = sentMessage.message_id;
+  try {
+    await telegram("sendMessage", {
+      chat_id: ADMIN_ID,
+      text: "👨‍🏫 Teacher Control\\nप्रश्न " + (run.index + 1) + "/" + run.questions.length + " जारी है। अगला सवाल भेजने के लिए नीचे दबाएँ।",
+      reply_markup: { inline_keyboard: [[{ text: "➡️ Next Question", callback_data: "qznext:" + chatId + ":" + quiz.id }]] }
+    });
+  } catch (error) {
+    console.warn("Teacher DM unavailable; use /quiznext in group:", error.message);
+  }
 }
 
 async function finishQuizRun(chatId, room, run, stopped = false) {
@@ -476,9 +484,11 @@ async function handleUpdate(update, io) {
         await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "केवल शिक्षक अगला सवाल भेज सकते हैं।", show_alert: true });
         return;
       }
-      const quizId = String(callback.data).split(":")[1];
-      const run = activeQuizRuns.get(String(chatId));
-      const activeQuiz = await db.getActiveTelegramQuiz(chatId);
+      const nextParts = String(callback.data).split(":");
+      const targetChatId = nextParts.length === 3 ? nextParts[1] : String(chatId);
+      const quizId = nextParts.length === 3 ? nextParts[2] : nextParts[1];
+      const run = activeQuizRuns.get(String(targetChatId));
+      const activeQuiz = await db.getActiveTelegramQuiz(targetChatId);
       if (!run || !activeQuiz || activeQuiz.id !== quizId) {
         await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "यह सवाल पहले ही आगे बढ़ चुका है।", show_alert: true });
         return;
@@ -486,8 +496,8 @@ async function handleUpdate(update, io) {
       await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "अगला सवाल भेजा जा रहा है…" });
       await telegram("editMessageReplyMarkup", { chat_id: chatId, message_id: callback.message.message_id, reply_markup: { inline_keyboard: [] } });
       run.index += 1;
-      if (run.index >= run.questions.length) await finishQuizRun(chatId, run.room, run, false);
-      else await sendQuizQuestion(chatId, run.room, run);
+      if (run.index >= run.questions.length) await finishQuizRun(targetChatId, run.room, run, false);
+      else await sendQuizQuestion(targetChatId, run.room, run);
       return;
     }
     if (String(callback.data || "").startsWith("qz:")) {
