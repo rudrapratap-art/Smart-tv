@@ -28,6 +28,7 @@ Set these in Render Dashboard → your Web Service → Environment:
 ## Telegram commands
 - `/start` or `/help` — help
 - `/status` — room and current question
+- `/select` — choose Class → Subject → Chapter and load only those questions on the TV
 - `/next`, `/prev` — navigate
 - `/answer`, `/hide` — reveal/hide answer
 - `/list` — list first 30 questions with IDs
