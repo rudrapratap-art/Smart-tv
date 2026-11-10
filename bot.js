@@ -432,6 +432,16 @@ async function handleUpdate(update, io) {
           text: selected === Number(activeQuiz.correct_answer) ? "✅ सही उत्तर दर्ज हुआ!" : "उत्तर दर्ज हुआ।",
           show_alert: false
         });
+        // Refresh the shared group message with a live response count.
+        const responses = await db.getTelegramQuizResponses(quizId);
+        const baseText = String(callback.message?.text || "").replace(/\\n\\n📊 जवाब मिले: \\d+$/, "");
+        await telegram("editMessageText", {
+          chat_id: chatId,
+          message_id: callback.message.message_id,
+          text: baseText + "\\n\\n📊 जवाब मिले: " + responses.length,
+          parse_mode: "HTML",
+          reply_markup: callback.message.reply_markup
+        });
       } catch (error) {
         console.error("Quiz response:", error.message);
         await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "उत्तर सेव नहीं हुआ। फिर कोशिश करें।", show_alert: true });
@@ -617,7 +627,7 @@ async function handleUpdate(update, io) {
         parse_mode: "HTML",
         reply_markup: { inline_keyboard: keyboard }
       });
-      await reply(chatId, "✅ Quiz Group में शुरू हो गया। विद्यार्थी ऊपर दिए गए विकल्प चुन सकते हैं।", secondKeyboard);
+      await telegram("sendMessage", { chat_id: chatId, text: "✅ Quiz Group में शुरू हो गया। विद्यार्थी ऊपर दिए गए विकल्प चुन सकते हैं।" });
       return;
     }
 
@@ -634,13 +644,14 @@ async function handleUpdate(update, io) {
       await db.stopTelegramQuiz(room);
       const responses = await db.getTelegramQuizResponses(activeQuiz.id);
       const correct = responses.filter(x => x.is_correct).length;
-      await reply(chatId,
-        "⏹ <b>Quiz बंद हो गया!</b>\\n" +
-        "कुल उत्तर: <b>" + responses.length + "</b>\\n" +
-        "सही उत्तर: <b>" + correct + "</b>\\n" +
-        "सही विकल्प: <b>" + String.fromCharCode(65 + Number(activeQuiz.correct_answer)) + "</b>",
-        secondKeyboard
-      );
+      await telegram("sendMessage", {
+        chat_id: chatId,
+        text: "⏹ <b>Quiz बंद हो गया!</b>\\n" +
+          "कुल उत्तर: <b>" + responses.length + "</b>\\n" +
+          "सही उत्तर: <b>" + correct + "</b>\\n" +
+          "सही विकल्प: <b>" + String.fromCharCode(65 + Number(activeQuiz.correct_answer)) + "</b>",
+        parse_mode: "HTML"
+      });
       return;
     }
 
