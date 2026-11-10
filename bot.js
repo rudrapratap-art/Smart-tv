@@ -73,12 +73,12 @@ async function sendQuizQuestion(chatId, room, run) {
     text: String.fromCharCode(65 + index) + ". " + String(option).slice(0, 55),
     callback_data: "qz:" + quiz.id + ":" + index
   }]);
-  const messageText = "📝 <b>SMART CLASSROOM LIVE QUIZ</b>\\n\\n" +
-    "🎓 " + escapeHtml(q.cls) + " • " + escapeHtml(q.subject) + "\\n" +
-    "📖 " + escapeHtml(q.chapter) + "\\n" +
-    "🔢 प्रश्न " + (run.index + 1) + "/" + run.questions.length + "\\n" +
-    "⏳ उत्तर देने के लिए 30 सेकंड हैं। समय पूरा होने पर अगला सवाल अपने-आप आएगा।\\n\\n" +
-    "<b>" + escapeHtml(questionText) + "</b>\\n\\n" +
+  const messageText = "📝 <b>SMART CLASSROOM LIVE QUIZ</b>\n\n" +
+    "🎓 " + escapeHtml(q.cls) + " • " + escapeHtml(q.subject) + "\n" +
+    "📖 " + escapeHtml(q.chapter) + "\n" +
+    "🔢 प्रश्न " + (run.index + 1) + "/" + run.questions.length + "\n" +
+    "⏳ उत्तर देने के लिए 30 सेकंड हैं। समय पूरा होने पर अगला सवाल अपने-आप आएगा।\n\n" +
+    "<b>" + escapeHtml(questionText) + "</b>\n\n" +
     "नीचे दिए गए विकल्पों में से एक चुनें। हर विद्यार्थी का केवल पहला उत्तर स्वीकार होगा।";
   const sentMessage = await telegram("sendMessage", {
     chat_id: chatId, text: messageText, parse_mode: "HTML",
