@@ -60,9 +60,9 @@ async function commitCsvImport(chatId, incoming, io, room) {
   await reply(chatId,
     "✅ <b>CSV Import पूरा हुआ!</b>\\n" +
     "📥 Preview में जाँचे गए: " + incoming.length + "\\n" +
-    "➕ नए questions add: " + additions.length + "\\n" +
-    "⏭️ Duplicate skip: " + (incoming.length - additions.length) + "\\n" +
-    "📚 Total question bank: " + combined.length + "\\n\\n" +
+    "➕ नए questions add: " + additions.length + "\n" +
+    "⏭️ Duplicate skip: " + (incoming.length - additions.length) + "\n" +
+    "📚 Total question bank: " + combined.length + "\n\n" +
     "पुराने questions सुरक्षित रखे गए हैं।"
   );
 }
@@ -183,7 +183,7 @@ async function previewCsvDocument(message) {
   if (!response.ok) throw new Error("CSV download failed (" + response.status + ")");
   const bytes = Buffer.from(await response.arrayBuffer());
   if (bytes.length > 5 * 1024 * 1024) throw new Error("CSV file अधिकतम 5 MB की हो सकती है।");
-  const incoming = parseQuestionsCsv(bytes.toString("utf8").replace(/^\\uFEFF/, ""));
+  const incoming = parseQuestionsCsv(bytes.toString("utf8").replace(/^\uFEFF/, ""));
   const chatId = String(message.chat.id);
   pendingCsvImports.set(chatId, { questions: incoming, createdAt: Date.now() });
   const sample = incoming.slice(0, 5).map((q, i) =>
