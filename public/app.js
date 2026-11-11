@@ -198,6 +198,17 @@ window.addEventListener("keydown",e=>{if(document.activeElement.matches("input,t
 renderList();renderController();bootstrapRemote();
 // Upgrade v2: CSV import/export and student performance
 let scores=loadJson("sc_scores",[]);
+function updateDashboardOverview(){
+ const classes=new Set(questions.map(q=>String(q.cls||"").trim()).filter(Boolean));
+ const correct=scores.filter(x=>x.correct).length;
+ if($("dashboardClassCount"))$("dashboardClassCount").textContent=classes.size;
+ if($("dashboardAttempts"))$("dashboardAttempts").textContent=scores.length;
+ if($("dashboardAccuracy"))$("dashboardAccuracy").textContent=(scores.length?Math.round(correct/scores.length*100):0)+"%";
+ if($("dashboardRecent")){
+  const recent=[...scores].sort((a,b)=>String(b.time||"").localeCompare(String(a.time||""))).slice(0,5);
+  $("dashboardRecent").innerHTML=recent.length?recent.map(x=>"<div class=\"recent-row\"><span><b>"+esc(x.name||"Student")+"</b><small>"+esc(x.question||"Question attempt")+"</small></span><strong class=\""+(x.correct?"is-correct":"is-wrong")+"\">"+(x.correct?"Correct":"Incorrect")+"</strong></div>").join(""):"<p class=\"muted\">अभी कोई activity नहीं है। Controller में score दर्ज करें।</p>";
+ }
+}
 function saveScores(){localStorage.setItem("sc_scores",JSON.stringify(scores));renderScores()}
 function renderScores(){
  const correct=scores.filter(x=>x.correct).length, wrong=scores.length-correct;
@@ -212,7 +223,7 @@ function recordScore(correct){
  const name=$("studentName")?.value.trim();
  if(!name){toast("पहले बच्चे का नाम लिखें");return}
  const q=current();scores.push({name,correct,question:q?.hi||"",class:q?.cls||"",subject:q?.subject||"",time:new Date().toISOString()});
- saveScores();toast(correct?"Correct answer दर्ज हुआ (+1)":"Incorrect answer दर्ज हुआ");
+ saveScores();updateDashboardOverview();toast(correct?"Correct answer दर्ज हुआ (+1)":"Incorrect answer दर्ज हुआ");
 }
 if($("markCorrect"))$("markCorrect").onclick=()=>recordScore(true);
 if($("markWrong"))$("markWrong").onclick=()=>recordScore(false);
@@ -270,6 +281,7 @@ if($("importCsv"))$("importCsv").onchange=async e=>{
  }catch(err){toast("Import failed: "+err.message);console.error(err)}finally{e.target.value=""}
 };
 renderScores();
+updateDashboardOverview();
 
 /* Gemini AI question generator */
 let aiGeneratedQuestions = [];
