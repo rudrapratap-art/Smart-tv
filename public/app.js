@@ -226,11 +226,12 @@ function updateDashboardOverview(){
 }
 function saveScores(){localStorage.setItem("sc_scores",JSON.stringify(scores));renderScores()}
 function renderScores(){
- const correct=scores.filter(x=>x.correct).length, wrong=scores.length-correct;
- if($("attemptCount"))$("attemptCount").textContent=scores.length;
+ const period=$("scorePeriod")?.value||"all";const cutoff=period==="all"?0:Date.now()-Number(period)*86400000;const visible=scores.filter(x=>!cutoff||!Number.isFinite(Date.parse(x.time||""))||Date.parse(x.time)>=cutoff);
+ const correct=visible.filter(x=>x.correct).length, wrong=visible.length-correct;
+ if($("attemptCount"))$("attemptCount").textContent=visible.length;
  if($("correctCount"))$("correctCount").textContent=correct;
  if($("wrongCount"))$("wrongCount").textContent=wrong;
- if($("accuracyCount"))$("accuracyCount").textContent=(scores.length?Math.round(correct/scores.length*100):0)+"%";
+ if($("accuracyCount"))$("accuracyCount").textContent=(visible.length?Math.round(correct/visible.length*100):0)+"%";
  const grouped={};scores.forEach(x=>{let k=x.name||"Unnamed";grouped[k]??={correct:0,wrong:0};grouped[k][x.correct?"correct":"wrong"]++});
  if($("scoreboard"))$("scoreboard").innerHTML=Object.keys(grouped).length?`<table><thead><tr><th>Student</th><th>Correct</th><th>Incorrect</th><th>Score</th></tr></thead><tbody>${Object.entries(grouped).map(([n,v])=>`<tr><td>${esc(n)}</td><td>${v.correct}</td><td>${v.wrong}</td><td><b>${v.correct}</b></td></tr>`).join("")}</tbody></table>`:"<p class='muted'>अभी कोई score दर्ज नहीं है। Controller में बच्चे का नाम लिखकर Correct या Incorrect दबाएँ।</p>";
  updateDashboardOverview();
@@ -244,6 +245,8 @@ function recordScore(correct){
 if($("markCorrect"))$("markCorrect").onclick=()=>recordScore(true);
 if($("markWrong"))$("markWrong").onclick=()=>recordScore(false);
 if($("clearScores"))$("clearScores").onclick=()=>{if(confirm("सभी score records हटाएँ?")){scores=[];saveScores();toast("Score records cleared")}};
+if($("scorePeriod"))$("scorePeriod").onchange=renderScores;
+if($("exportScores"))$("exportScores").onclick=()=>{const rows=[["Student","Correct","Question","Class","Subject","Time"],...scores.map(x=>[x.name,x.correct?"Yes":"No",x.question,x.class,x.subject,x.time])];const csv=rows.map(r=>r.map(csvCell).join(",")).join(nl);const url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));const link=document.createElement("a");link.href=url;link.download="smart-classroom-performance.csv";link.click();URL.revokeObjectURL(url)};
 function csvCell(v){return '"'+String(v??"").replace(/"/g,'""')+'"'}
 if($("exportCsv"))$("exportCsv").onclick=()=>{
  const header=["class","subject","chapter","hi","en","A","B","C","D","answer","explain"];
