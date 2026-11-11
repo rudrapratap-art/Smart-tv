@@ -178,7 +178,17 @@ function editQuestion(id){
  $("editorTitle").textContent="Edit Question";$("editor").classList.remove("hidden");$("editor").scrollIntoView({behavior:"smooth"});
 }
 $("addQuestion").onclick=()=>{$("editor").classList.remove("hidden");clearForm()};$("closeEditor").onclick=()=>$("editor").classList.add("hidden");
-$("saveQuestion").onclick=()=>{let q={id:editing||Date.now(),cls:$("qClass").value,subject:$("qSubject").value,chapter:$("qChapter").value,hi:$("qHi").value,en:$("qEn").value,opts:["optA","optB","optC","optD"].map(id=>$(id).value),answer:+$("qAnswer").value,explain:$("qExplanation").value};if(!q.hi&&!q.en){toast("Question लिखें");return}if(editing)questions=questions.map(x=>x.id===editing?q:x);else questions.push(q);index=questions.length-1;persist();$("editor").classList.add("hidden");toast("Question saved")}
+$("saveQuestion").onclick=()=>{
+ const q={id:editing||Date.now(),cls:$("qClass").value.trim(),subject:$("qSubject").value.trim(),chapter:$("qChapter").value.trim(),hi:$("qHi").value.trim(),en:$("qEn").value.trim(),opts:["optA","optB","optC","optD"].map(id=>$(id).value.trim()),answer:+$("qAnswer").value,explain:$("qExplanation").value.trim()};
+ if(!q.hi&&!q.en){toast("Question लिखें");return}
+ if(!q.chapter){toast("Chapter का नाम भरें");$("qChapter").focus();return}
+ const missing=q.opts.findIndex(v=>!v);if(missing>=0){const field="opt"+String.fromCharCode(65+missing);toast("Option "+String.fromCharCode(65+missing)+" खाली है");$(field).focus();return}
+ const fingerprint=v=>[v.cls,v.subject,v.chapter,(v.hi||v.en).trim().toLocaleLowerCase()].join("|");
+ const duplicate=questions.find(v=>String(v.id)!==String(editing)&&fingerprint(v)===fingerprint(q));
+ if(duplicate){toast("यह question पहले से मौजूद है");return}
+ if(editing)questions=questions.map(x=>String(x.id)===String(editing)?q:x);else questions.push(q);
+ index=Math.max(0,getControllerQuestions().length-1);persist();$("editor").classList.add("hidden");toast(editing?"Question updated":"Question saved")
+}
 function openTv(){window.open("/tv.html","_blank","noopener")}
 $("startTv").onclick=openTv;$("quickTv").onclick=openTv;$("openController").onclick=()=>showPage("controller");$("quickController").onclick=()=>showPage("controller");
 $("joinRoom").onclick=()=>{room=$("roomCode").value.trim().toUpperCase()||"CLASS10";if(socket)socket.emit("join-room",room);$("roomStatus").textContent="Room: "+room;broadcast();toast("Room connected: "+room)};
