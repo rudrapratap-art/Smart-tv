@@ -655,10 +655,10 @@ async function handleUpdate(update, io) {
   const publicQuizText = rawText === "📝 Start Quiz" ? "/quiz" : rawText;
   const publicQuizCommand = publicQuizText.split(/\\s+/)[0].split("@")[0].toLowerCase();
   const isGroupChat = ["group", "supergroup"].includes(message.chat.type);
-  const canStartPublicQuiz = isGroupChat && publicQuizCommand === "/quiz";
+  const canControlPublicQuiz = isGroupChat && ["/quiz", "/quizstop"].includes(publicQuizCommand);
   const isAdmin = Boolean(ADMIN_ID) && senderId === ADMIN_ID;
-  if (!isAdmin && !canStartPublicQuiz) {
-    await reply(chatId, "⛔ यह action केवल authorized admin के लिए है।\nQuiz शुरू करने के लिए Group में /quiz भेजें।");
+  if (!isAdmin && !canControlPublicQuiz) {
+    await reply(chatId, "⛔ यह action केवल authorized admin के लिए है।\nGroup में कोई भी सदस्य /quiz या /quizstop चला सकता है।");
     return;
   }
 
