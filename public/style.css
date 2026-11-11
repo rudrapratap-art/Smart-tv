@@ -29,3 +29,7 @@
 .selection-panel .control-buttons{max-width:460px}
 #controllerFilterSummary{margin-bottom:0}
 @media(max-width:700px){.selection-panel .form-grid{grid-template-columns:1fr}.filters{flex-wrap:wrap}.filters select,.filters input{min-width:calc(50% - 6px);flex:1}}
+
+/* Dashboard overview */
+.dashboard-overview{margin:18px 0 28px}.dashboard-overview .section-head{margin:0 0 18px}.dashboard-lower{display:grid;grid-template-columns:1fr 1.2fr;gap:24px}.dashboard-links{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.dashboard-links button{font-size:12px}.recent-activity{margin-top:10px}.recent-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}.recent-row span{min-width:0}.recent-row small{display:block;color:var(--muted);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:340px;margin-top:3px}.recent-row strong{font-size:11px;white-space:nowrap}.is-correct{color:#159767}.is-wrong{color:#d24a5a}
+@media(max-width:760px){.dashboard-lower{grid-template-columns:1fr}.dashboard-stats{margin-bottom:18px}.recent-row small{max-width:220px}}
