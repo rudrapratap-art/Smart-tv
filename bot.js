@@ -2,7 +2,8 @@ const db = require("./lib/supabase");
 const gemini = require("./lib/gemini");
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
-const ADMIN_ID = String(process.env.TELEGRAM_ADMIN_ID || "");
+const ADMIN_IDS = new Set([...(process.env.TELEGRAM_ADMIN_IDS || "").split(","), process.env.TELEGRAM_ADMIN_ID || ""] .map(id => id.trim()).filter(Boolean));
+function isAuthorizedAdmin(userId) { return ADMIN_IDS.has(String(userId || "")); }
 const DEFAULT_ROOM = String(process.env.CLASSROOM_ROOM || "CLASS10").toUpperCase();
 
 async function telegram(method, payload = {}) {
@@ -574,7 +575,7 @@ async function handleUpdate(update, io) {
       }
       return;
     }
-    if (!ADMIN_ID || senderId !== ADMIN_ID) {
+    if (!isAuthorizedAdmin(senderId)) {
       await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "Unauthorized", show_alert: true });
       return;
     }
@@ -657,7 +658,7 @@ async function handleUpdate(update, io) {
   const chatId = message.chat.id;
   const senderId = String(message.from?.id || "");
   const rawText = String(message.text || "").trim();
-  const isAdmin = Boolean(ADMIN_ID) && senderId === ADMIN_ID;
+  const isAdmin = isAuthorizedAdmin(senderId);
   if (!isAdmin) {
     await reply(chatId, "⛔ यह action केवल authorized classroom admin के लिए है।");
     return;
@@ -783,9 +784,10 @@ async function handleUpdate(update, io) {
       if (!candidates.length) throw new Error("पहले 🎓 Select Questions से Chapter चुनें या Question Bank में सवाल जोड़ें।");
       const previousRun = activeQuizRuns.get(String(chatId));
       if (previousRun) await finishQuizRun(chatId, room, previousRun, true);
-      const run = { room, questions: candidates, index: 0, quizIds: [], timer: null, countdownTimer: null, stopped: false };
+      const quizRoom = `${room}_${chatId}`;
+      const run = { room: quizRoom, questions: candidates, index: 0, quizIds: [], timer: null, countdownTimer: null, revealTimer: null, stopped: false };
       activeQuizRuns.set(String(chatId), run);
-      await sendQuizQuestion(chatId, room, run);
+      await sendQuizQuestion(chatId, quizRoom, run);
       await telegram("sendMessage", { chat_id: chatId, text: "✅ Automatic Quiz शुरू हो गया। हर सवाल के लिए 30 सेकंड हैं।" });
       return;
     }
