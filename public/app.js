@@ -202,7 +202,7 @@ $("joinRoom").onclick=()=>{room=$("roomCode").value.trim().toUpperCase()||"CLASS
 function resetTimer(){remaining=+$("duration").value;renderTimer()}
 function renderTimer(){$("timerDisplay").textContent="00:"+String(remaining).padStart(2,"0")}
 $("duration").onchange=resetTimer;
-$("timerStart").onclick=()=>{if(timer)return;timer=setInterval(()=>{remaining--;renderTimer();if(remaining<=0){if($("autoReveal").checked&&!showAnswer){showAnswer=true;broadcast();remaining=5}else{move(1);return}}},1000)};
+$("timerStart").onclick=()=>{if(timer)return;timer=setInterval(()=>{remaining--;renderTimer();if(remaining<=0){if(!showAnswer){showAnswer=true;renderController();broadcast();remaining=5;renderTimer()}else{move(1);return}}},1000)};
 $("timerPause").onclick=()=>{clearInterval(timer);timer=null};$("timerReset").onclick=()=>{clearInterval(timer);timer=null;resetTimer()};resetTimer();
 async function syncQuestionsNow(){
  const key=localStorage.getItem("sc_admin_key")||"";
