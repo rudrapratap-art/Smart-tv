@@ -319,7 +319,7 @@ if($("importCsv"))$("importCsv").onchange=async e=>{
 renderScores();
 updateDashboardOverview();
 
-/* Gemini AI question generator */
+/* OpenRouter AI question generator */
 let aiGeneratedQuestions = [];
 if ($("aiGenerate")) $("aiGenerate").onclick = async () => {
  const status=$("aiStatus"), preview=$("aiPreview"), button=$("aiGenerate");
@@ -327,7 +327,7 @@ if ($("aiGenerate")) $("aiGenerate").onclick = async () => {
  if(!adminKey){toast("पहले Settings में Cloud Admin API Key सेव करें");showPage("settings");return}
  const payload={cls:$("aiClass").value,subject:$("aiSubject").value.trim(),chapter:$("aiChapter").value.trim(),count:+$("aiCount").value,difficulty:$("aiDifficulty").value,language:$("aiLanguage").value};
  if(!payload.subject||!payload.chapter){toast("Subject और Chapter भरें");return}
- button.disabled=true;button.textContent="Generating...";status.textContent="Gemini सवाल तैयार कर रहा है...";preview.innerHTML="";$("aiSave").classList.add("hidden");
+ button.disabled=true;button.textContent="Generating...";status.textContent="OpenRouter AI सवाल तैयार कर रहा है...";preview.innerHTML="";$("aiSave").classList.add("hidden");
  try{
   const response=await fetch("/api/ai/generate",{method:"POST",headers:{"Content-Type":"application/json","X-Admin-Key":adminKey},body:JSON.stringify(payload)});
   const data=await response.json();if(!response.ok)throw new Error(data.error||"Generation failed");
@@ -335,7 +335,7 @@ if ($("aiGenerate")) $("aiGenerate").onclick = async () => {
   preview.innerHTML=aiGeneratedQuestions.map((q,i)=>"<article class='q-row'><div><b>"+(i+1)+". "+esc(q.hi||q.en)+"</b><small>"+esc(q.en||"")+"</small><small>"+q.opts.map((o,j)=>String.fromCharCode(65+j)+". "+esc(o)).join(" · ")+"</small><small>Correct: "+String.fromCharCode(65+q.answer)+" — "+esc(q.explain)+"</small></div></article>").join("");
   status.textContent=aiGeneratedQuestions.length+" सवाल तैयार हैं। Save करने से पहले Preview जाँच लें।";
   $("aiSave").classList.remove("hidden");
- }catch(error){status.textContent=error.message;toast("Gemini: "+error.message)}
+ }catch(error){status.textContent=error.message;toast("AI Generator: "+error.message)}
  finally{button.disabled=false;button.textContent="✨ Generate Questions"}
 };
 if ($("aiSave")) $("aiSave").onclick = async () => {
