@@ -103,15 +103,33 @@ async function sendQuizQuestion(chatId, room, run) {
     if (run.stopped || activeQuizRuns.get(String(chatId)) !== run) return;
     try {
       if (run.countdownTimer) clearInterval(run.countdownTimer);
-      await telegram("editMessageReplyMarkup", {
+  if (run.revealTimer) clearTimeout(run.revealTimer);
+      const responses = await db.getTelegramQuizResponses(quiz.id).catch(() => []);
+      const correctIndex = Number(q.answer);
+      const correctOption = q.opts?.[correctIndex] || "";
+      const correctLetter = ["A", "B", "C", "D"][correctIndex] || "—";
+      const correctCount = responses.filter(item => item.is_correct).length;
+      const revealText = run.messageText +
+        "\n\n⏰ <b>समय समाप्त! अब सही उत्तर देखें</b>" +
+        "\n✅ <b>सही उत्तर: " + correctLetter + ". " + escapeHtml(correctOption) + "</b>" +
+        (q.explain ? "\n💡 " + escapeHtml(q.explain) : "") +
+        "\n\n📊 जवाब: " + responses.length +
+        " | सही: " + correctCount +
+        " | गलत: " + (responses.length - correctCount) +
+        "\n➡️ अगला सवाल 5 सेकंड में…";
+      await telegram("editMessageText", {
         chat_id: chatId, message_id: sentMessage.message_id,
+        text: revealText, parse_mode: "HTML",
         reply_markup: { inline_keyboard: [] }
       });
-      run.index += 1;
-      if (run.index >= run.questions.length) await finishQuizRun(chatId, room, run, false);
-      else await sendQuizQuestion(chatId, room, run);
+      run.revealTimer = setTimeout(async () => {
+        if (run.stopped || activeQuizRuns.get(String(chatId)) !== run) return;
+        run.index += 1;
+        if (run.index >= run.questions.length) await finishQuizRun(chatId, room, run, false);
+        else await sendQuizQuestion(chatId, room, run);
+      }, 5000);
     } catch (error) {
-      console.error("Quiz auto advance:", error.message);
+      console.error("Quiz answer reveal:", error.message);
     }
   }, QUIZ_QUESTION_SECONDS * 1000);
 }
