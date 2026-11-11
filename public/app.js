@@ -127,9 +127,13 @@ function getFilteredQuestions(){
 }
 function renderList(){
  updateFilterOptions();
- const filtered=getFilteredQuestions();
+ const filtered=getFilteredQuestions().slice();
+ const sort=$("questionSort")?.value||"recent";
+ const textCompare=(a,b)=>String(a||"").localeCompare(String(b||""),undefined,{numeric:true,sensitivity:"base"});
+ filtered.sort((a,b)=>sort==="oldest"?Number(a.id)-Number(b.id):sort==="class"?textCompare(a.cls,b.cls)||textCompare(a.subject,b.subject):sort==="subject"?textCompare(a.subject,b.subject)||textCompare(a.chapter,b.chapter):sort==="chapter"?textCompare(a.chapter,b.chapter)||textCompare(a.subject,b.subject):Number(b.id)-Number(a.id));
  const list=$("questionList");
  if(!list)return;
+ if($("questionResultCount"))$("questionResultCount").textContent="Showing "+filtered.length+" of "+questions.length+" questions";
  const selectedVisible=filtered.filter(q=>selectedQuestionIds.has(String(q.id))).length;
  const allVisibleSelected=filtered.length>0&&selectedVisible===filtered.length;
  const bulk=$("bulkActions");
@@ -150,11 +154,11 @@ function renderList(){
  list.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>editQuestion(b.dataset.edit));
 }
 function esc(s){return String(s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
-["classFilter","subjectFilter"].forEach(id=>$(id).addEventListener("change",renderList));
+["classFilter","subjectFilter","questionSort"].forEach(id=>$(id)?.addEventListener("change",renderList));
 $("searchQuestion").addEventListener("input",renderList);
 $("chapterFilter").addEventListener("change",renderList);
 if($("clearFilters"))$("clearFilters").onclick=()=>{
- $("classFilter").value="all";$("subjectFilter").value="all";$("chapterFilter").value="all";$("searchQuestion").value="";
+ $("classFilter").value="all";$("subjectFilter").value="all";$("chapterFilter").value="all";$("searchQuestion").value="";if($("questionSort"))$("questionSort").value="recent";
  selectedQuestionIds.clear();renderList();
 };
 if($("selectAllFiltered"))$("selectAllFiltered").onchange=e=>{getFilteredQuestions().forEach(q=>{const id=String(q.id);if(e.target.checked)selectedQuestionIds.add(id);else selectedQuestionIds.delete(id)});renderList()};
