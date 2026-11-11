@@ -42,3 +42,7 @@ button,.tab,select,input,textarea{min-height:44px}button:focus-visible,.tab:focu
 /* Question bank quality-of-life */
 .bank-result-count{margin:-8px 0 12px;font-weight:600}.filters #questionSort{min-width:160px}.filters #searchQuestion{min-width:180px}.question-list .q-row{transition:border-color .15s,box-shadow .15s}.question-list .q-row:hover{border-color:#c8d8f4;box-shadow:0 4px 14px #1b3b6810}.editor label{font-weight:600}.editor textarea{resize:vertical;min-height:64px}
 @media(max-width:760px){.filters #questionSort,.filters #searchQuestion{min-width:100%;width:100%}.bank-result-count{margin:0 0 10px}}
+
+/* TV presentation mode enhancements */
+.tv-header-right{display:flex;align-items:center;gap:10px}.tv-fullscreen{border:1px solid #45638d;background:#17345c;color:#d9eaff;border-radius:8px;padding:6px 12px;min-height:34px;font-size:20px;cursor:pointer}.tv-clock{font-variant-numeric:tabular-nums}.tv-option.is-correct{border-color:#26c997;background:#12453f;box-shadow:0 0 0 2px #26c99722}.tv-option.is-correct b,.tv-option.is-correct .correct-mark{color:#83ffd2}.tv-option .correct-mark{margin-left:auto;font-size:22px}.tv-answer{line-height:1.5;overflow-wrap:anywhere}.tv-body:fullscreen{width:100vw;height:100vh}.tv-body:fullscreen .tv-main{height:calc(100vh - 66px)}
+@media(max-width:760px){.tv-header-right{gap:5px;font-size:9px}.tv-fullscreen{padding:4px 8px;font-size:17px}.tv-clock{display:none}.tv-answer{font-size:17px}.tv-body:fullscreen .tv-main{height:calc(100dvh - 54px)}}
