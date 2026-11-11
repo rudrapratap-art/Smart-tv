@@ -24,7 +24,8 @@ function persist(){
  if(remoteReady&&adminKey){
   fetch("/api/questions",{method:"PUT",headers:{"Content-Type":"application/json","X-Admin-Key":adminKey},body:JSON.stringify({questions})})
    .then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.json()})
-   .catch(err=>{console.warn("Cloud question save failed:",err);toast("Cloud save failed — Admin Key जाँचें")});
+   .then(data=>{if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync: Synced "+(data.count??questions.length)+" questions";})
+   .catch(err=>{console.warn("Cloud question save failed:",err);if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync failed: "+err.message;toast("Cloud save failed — Admin Key जाँचें")});
  }
 }
 function toast(t){let el=$("toast");el.textContent=t;el.classList.add("show");setTimeout(()=>el.classList.remove("show"),2200)}
@@ -42,14 +43,16 @@ if(socket){
  socket.on("disconnect",()=>{$("connectionStatus").textContent="Offline"});
 }
 async function bootstrapRemote(){
+ if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync: Checking…";
  try{
   const response=await fetch("/api/questions",{cache:"no-store"});
   if(response.ok){
    const data=await response.json();
    if(Array.isArray(data.questions)&&data.questions.length){questions=data.questions;localStorage.setItem("sc_questions",JSON.stringify(questions))}
    remoteReady=true;
-  }
- }catch(error){console.warn("Cloud question load unavailable:",error)}
+   if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync: Connected • "+questions.length+" questions loaded";
+  }else if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync unavailable — using local data";
+ }catch(error){console.warn("Cloud question load unavailable:",error);if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync offline — using local data"}
  $("totalCount").textContent=questions.length;renderList();renderController();
  if(socket&&socket.connected)socket.emit("join-room",room);
 }
@@ -201,6 +204,17 @@ function renderTimer(){$("timerDisplay").textContent="00:"+String(remaining).pad
 $("duration").onchange=resetTimer;
 $("timerStart").onclick=()=>{if(timer)return;timer=setInterval(()=>{remaining--;renderTimer();if(remaining<=0){if($("autoReveal").checked&&!showAnswer){showAnswer=true;broadcast();remaining=5}else{move(1);return}}},1000)};
 $("timerPause").onclick=()=>{clearInterval(timer);timer=null};$("timerReset").onclick=()=>{clearInterval(timer);timer=null;resetTimer()};resetTimer();
+async function syncQuestionsNow(){
+ const key=localStorage.getItem("sc_admin_key")||"";
+ if(!key){toast("पहले Settings में Admin Key सेव करें");if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync: Admin Key required";return}
+ if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync: Uploading…";
+ try{
+  const response=await fetch("/api/questions",{method:"PUT",headers:{"Content-Type":"application/json","X-Admin-Key":key},body:JSON.stringify({questions})});
+  const data=await response.json();if(!response.ok)throw new Error(data.error||("HTTP "+response.status));
+  remoteReady=true;if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync: Synced "+(data.count??questions.length)+" questions";toast("Cloud sync complete");
+ }catch(error){if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync failed: "+error.message;toast("Cloud sync failed")}
+}
+if($("syncNow"))$("syncNow").onclick=syncQuestionsNow;
 $("saveSettings").onclick=()=>{
  localStorage.setItem("sc_language",$("displayLanguage").value);
  localStorage.setItem("sc_order",$("questionOrder").value);
