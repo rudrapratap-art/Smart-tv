@@ -65,3 +65,6 @@ body.dark-mode{--bg:#0b1220;--card:#121e30;--ink:#e7eefb;--muted:#9aabc4;--line:
 .dark-mode .ai-generator{background:#142238;border-color:#314968}
 .dark-mode .dashboard-links button{background:#17263b;color:var(--ink);border-color:#354760}
 .dark-mode .empty-state{border-style:dashed}
+
+/* Cloud sync status */
+#cloudSyncStatus{padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--bg);line-height:1.5;overflow-wrap:anywhere}.dark-mode #cloudSyncStatus{background:#101d30;border-color:#354760}
