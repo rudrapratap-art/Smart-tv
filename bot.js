@@ -560,7 +560,7 @@ async function handleUpdate(update, io) {
         });
         // Refresh the shared group message with a live response count.
         const responses = await db.getTelegramQuizResponses(quizId);
-        const baseText = String(callback.message?.text || "").replace(/\n\n📊 जवाब मिले: \d+$/, "");
+        const baseText = String(callback.message?.text || "").replace(/\n+📊 जवाब मिले: \d+$/, "");
         await telegram("editMessageText", {
           chat_id: chatId,
           message_id: callback.message.message_id,
