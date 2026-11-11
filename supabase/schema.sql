@@ -26,3 +26,17 @@ revoke all on public.questions from anon, authenticated;
 revoke all on public.classroom_state from anon, authenticated;
 grant all on public.questions to service_role;
 grant all on public.classroom_state to service_role;
+
+-- One durable quiz session per Telegram group; question snapshots survive restarts.
+create table if not exists public.telegram_quiz_sessions (
+  chat_id text primary key,
+  room text not null,
+  questions jsonb not null default '[]'::jsonb,
+  current_index integer not null default 0,
+  active boolean not null default true,
+  status text not null default 'asking',
+  updated_at timestamptz not null default now()
+);
+alter table public.telegram_quiz_sessions enable row level security;
+revoke all on public.telegram_quiz_sessions from anon, authenticated;
+grant all on public.telegram_quiz_sessions to service_role;
