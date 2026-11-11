@@ -65,6 +65,10 @@ const QUIZ_QUESTION_SECONDS = 30;
 async function sendQuizQuestion(chatId, room, run) {
   if (run.stopped || activeQuizRuns.get(String(chatId)) !== run) return;
   const q = run.questions[run.index];
+  await db.saveTelegramQuizSession({
+    chat_id: String(chatId), room, questions: run.questions,
+    current_index: run.index, active: true, status: "asking"
+  });
   const quizId = "qz_" + Date.now() + "_" + Math.floor(Math.random() * 1000000);
   const questionText = q.hi || q.en;
   const quiz = await db.startTelegramQuiz({
@@ -147,6 +151,7 @@ async function finishQuizRun(chatId, room, run, stopped = false) {
     }).catch(() => {});
   }
   await db.stopTelegramQuiz(room);
+  await db.stopTelegramQuizSession(chatId).catch(error => console.error("Quiz session cleanup:", error.message));
   activeQuizRuns.delete(String(chatId));
   const totals = new Map();
   let totalAnswers = 0, correctAnswers = 0;
@@ -787,6 +792,7 @@ async function handleUpdate(update, io) {
       const quizRoom = `${room}_${chatId}`;
       const run = { room: quizRoom, questions: candidates, index: 0, quizIds: [], timer: null, countdownTimer: null, revealTimer: null, stopped: false };
       activeQuizRuns.set(String(chatId), run);
+      await db.saveTelegramQuizSession({ chat_id: String(chatId), room: quizRoom, questions: candidates, current_index: 0, active: true, status: "asking" });
       await sendQuizQuestion(chatId, quizRoom, run);
       await telegram("sendMessage", { chat_id: chatId, text: "✅ Automatic Quiz शुरू हो गया। हर सवाल के लिए 30 सेकंड हैं।" });
       return;
@@ -926,6 +932,28 @@ async function handleUpdate(update, io) {
   }
 }
 
+async function recoverActiveQuizRuns() {
+  if (!db.isConfigured()) return;
+  const sessions = await db.getActiveTelegramQuizSessions();
+  for (const session of sessions || []) {
+    const chatId = String(session.chat_id || "");
+    const questions = Array.isArray(session.questions) ? session.questions : [];
+    const index = Number(session.current_index || 0);
+    if (!chatId || !session.room || !questions.length || index < 0 || index >= questions.length) {
+      if (chatId) await db.stopTelegramQuizSession(chatId).catch(() => {});
+      continue;
+    }
+    try {
+      await db.stopTelegramQuiz(session.room);
+      const run = { room: session.room, questions, index, quizIds: [], timer: null, countdownTimer: null, revealTimer: null, stopped: false };
+      activeQuizRuns.set(chatId, run);
+      await telegram("sendMessage", { chat_id: chatId, text: "🔄 <b>Bot restart के बाद Quiz फिर से शुरू हुआ है।</b> वर्तमान प्रश्न का timer 30 सेकंड से शुरू होगा।", parse_mode: "HTML" });
+      await sendQuizQuestion(chatId, session.room, run);
+      console.log("Recovered Telegram quiz:", chatId, "question", index + 1);
+    } catch (error) { console.error("Quiz recovery failed for", chatId, error.message); }
+  }
+}
+
 async function configureWebhook() {
   if (!BOT_TOKEN) return;
   const base = (process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "");
@@ -964,4 +992,4 @@ async function configureWebhook() {
   console.log("Telegram webhook registered.");
 }
 
-module.exports = { handleUpdate, configureWebhook };
+module.exports = { handleUpdate, configureWebhook, recoverActiveQuizRuns };
