@@ -19,6 +19,7 @@ function persist(){
  $("totalCount").textContent=questions.length;
  selectedQuestionIds=new Set([...selectedQuestionIds].filter(id=>questions.some(q=>String(q.id)===id)));
  renderList();renderController();broadcast();
+ if(typeof updateDashboardOverview==="function")updateDashboardOverview();
  const adminKey=localStorage.getItem("sc_admin_key")||"";
  if(remoteReady&&adminKey){
   fetch("/api/questions",{method:"PUT",headers:{"Content-Type":"application/json","X-Admin-Key":adminKey},body:JSON.stringify({questions})})
@@ -218,6 +219,7 @@ function renderScores(){
  if($("accuracyCount"))$("accuracyCount").textContent=(scores.length?Math.round(correct/scores.length*100):0)+"%";
  const grouped={};scores.forEach(x=>{let k=x.name||"Unnamed";grouped[k]??={correct:0,wrong:0};grouped[k][x.correct?"correct":"wrong"]++});
  if($("scoreboard"))$("scoreboard").innerHTML=Object.keys(grouped).length?`<table><thead><tr><th>Student</th><th>Correct</th><th>Incorrect</th><th>Score</th></tr></thead><tbody>${Object.entries(grouped).map(([n,v])=>`<tr><td>${esc(n)}</td><td>${v.correct}</td><td>${v.wrong}</td><td><b>${v.correct}</b></td></tr>`).join("")}</tbody></table>`:"<p class='muted'>अभी कोई score दर्ज नहीं है। Controller में बच्चे का नाम लिखकर Correct या Incorrect दबाएँ।</p>";
+ updateDashboardOverview();
 }
 function recordScore(correct){
  const name=$("studentName")?.value.trim();
