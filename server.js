@@ -111,6 +111,6 @@ const port = process.env.PORT || 3000;
 server.listen(port, "0.0.0.0", async () => {
   console.log(`Smart Classroom running on ${port}`);
   if (!db.isConfigured()) console.warn("Supabase is not configured; set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
-  try { await bot.configureWebhook(); }
+  try { await bot.configureWebhook(); await bot.recoverActiveQuizRuns(); }
   catch (error) { console.error("Telegram webhook setup failed:", error.message); }
 });
