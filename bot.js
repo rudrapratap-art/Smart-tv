@@ -138,6 +138,7 @@ async function finishQuizRun(chatId, room, run, stopped = false) {
   run.stopped = true;
   if (run.timer) clearTimeout(run.timer);
   if (run.countdownTimer) clearInterval(run.countdownTimer);
+  if (run.revealTimer) clearTimeout(run.revealTimer);
   if (run.messageId) {
     await telegram("editMessageReplyMarkup", {
       chat_id: chatId, message_id: run.messageId,
@@ -534,7 +535,11 @@ async function handleUpdate(update, io) {
       }
       try {
         const activeQuiz = await db.getActiveTelegramQuiz(chatId);
-        if (!activeQuiz || activeQuiz.id !== quizId) {
+        const createdAt = Date.parse(activeQuiz?.created_at || "");
+        const expiredByDatabase = Number.isFinite(createdAt) && Date.now() - createdAt > QUIZ_QUESTION_SECONDS * 1000;
+        const activeRun = activeQuizRuns.get(String(chatId));
+        const expiredByRun = Boolean(activeRun?.deadline && Date.now() > activeRun.deadline);
+        if (!activeQuiz || activeQuiz.id !== quizId || expiredByDatabase || expiredByRun) {
           await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "यह Quiz बंद हो चुका है।", show_alert: true });
           return;
         }
@@ -600,7 +605,7 @@ async function handleUpdate(update, io) {
         const state = await getState(DEFAULT_ROOM, combined);
         state.questions = combined;
         await publish(io, DEFAULT_ROOM, state);
-        await reply(chatId, "✅ Gemini के " + additions.length + " नए questions Question Bank में save हो गए।\nDuplicates skipped: " + (pendingAi.questions.length - additions.length));
+        await reply(chatId, "✅ OpenRouter AI के " + additions.length + " नए questions Question Bank में save हो गए।\nDuplicates skipped: " + (pendingAi.questions.length - additions.length));
       } catch (error) { console.error("AI question save:", error.message); await reply(chatId, "⚠️ Save failed: " + escapeHtml(error.message)); }
       return;
     }
@@ -652,16 +657,11 @@ async function handleUpdate(update, io) {
   const chatId = message.chat.id;
   const senderId = String(message.from?.id || "");
   const rawText = String(message.text || "").trim();
-  const publicQuizText = rawText === "📝 Start Quiz" ? "/quiz" : rawText;
-  const publicQuizCommand = publicQuizText.split(/\\s+/)[0].split("@")[0].toLowerCase();
-  const isGroupChat = ["group", "supergroup"].includes(message.chat.type);
-  const canControlPublicQuiz = isGroupChat && ["/quiz", "/quizstop"].includes(publicQuizCommand);
   const isAdmin = Boolean(ADMIN_ID) && senderId === ADMIN_ID;
-  if (!isAdmin && !canControlPublicQuiz) {
-    await reply(chatId, "⛔ यह action केवल authorized admin के लिए है।\nGroup में कोई भी सदस्य /quiz या /quizstop चला सकता है।");
+  if (!isAdmin) {
+    await reply(chatId, "⛔ यह action केवल authorized classroom admin के लिए है।");
     return;
   }
-
   const room = DEFAULT_ROOM;
 
   try {
@@ -757,17 +757,17 @@ async function handleUpdate(update, io) {
       if (![ "private", "group", "supergroup" ].includes(message.chat.type)) return;
       const parts = arg.split("|").map(x => x.trim());
       if (parts.length < 3 || !parts[0] || !parts[1] || !parts[2]) {
-        await reply(chatId, "✨ <b>Gemini Question Generator</b>\nइस format में command भेजें:\n<code>/generate Class 10 | Science | Electricity | 10 | medium | both</code>\n\nक्रम: Class | Subject | Chapter | Count (1-50) | Difficulty (easy/medium/hard) | Language (hi/en/both)\n\nअंतिम तीन optional हैं।");
+        await reply(chatId, "✨ <b>OpenRouter AI Question Generator</b>\nइस format में command भेजें:\n<code>/generate Class 10 | Science | Electricity | 10 | medium | both</code>\n\nक्रम: Class | Subject | Chapter | Count (1-50) | Difficulty (easy/medium/hard) | Language (hi/en/both)\n\nअंतिम तीन optional हैं।");
         return;
       }
       const count = Math.max(1, Math.min(50, Number(parts[3]) || 10));
       const difficulty = ["easy","medium","hard"].includes((parts[4] || "medium").toLowerCase()) ? (parts[4] || "medium").toLowerCase() : "medium";
       const language = ["hi","en","both"].includes((parts[5] || "both").toLowerCase()) ? (parts[5] || "both").toLowerCase() : "both";
-      await reply(chatId, "⏳ Gemini " + count + " questions generate कर रहा है...");
+      await reply(chatId, "⏳ OpenRouter AI " + count + " questions generate कर रहा है...");
       const generated = await gemini.generateQuestions({ cls: parts[0], subject: parts[1], chapter: parts[2], count, difficulty, language });
       pendingAiGenerations.set(String(chatId), { questions: generated, createdAt: Date.now() });
       const preview = generated.slice(0, 5).map((q,i) => (i+1) + ". <b>" + escapeHtml(q.hi || q.en) + "</b>\n" + q.opts.map((o,j) => String.fromCharCode(65+j) + ". " + escapeHtml(o)).join("\n") + "\nAnswer: <b>" + ["A","B","C","D"][q.answer] + "</b>").join("\n\n");
-      await telegram("sendMessage", { chat_id: chatId, text: "✨ <b>Gemini Preview</b>\n\n📚 Generated: <b>" + generated.length + "</b>\n\n" + preview + (generated.length > 5 ? "\n\n…और " + (generated.length-5) + " questions" : "") + "\n\nConfirm करने पर Supabase Question Bank में save होंगे।", parse_mode: "HTML", reply_markup: { inline_keyboard: [[{text:"✅ Confirm & Save",callback_data:"ai_confirm"},{text:"❌ Cancel",callback_data:"ai_cancel"}]] } });
+      await telegram("sendMessage", { chat_id: chatId, text: "✨ <b>OpenRouter AI Preview</b>\n\n📚 Generated: <b>" + generated.length + "</b>\n\n" + preview + (generated.length > 5 ? "\n\n…और " + (generated.length-5) + " questions" : "") + "\n\nConfirm करने पर Supabase Question Bank में save होंगे।", parse_mode: "HTML", reply_markup: { inline_keyboard: [[{text:"✅ Confirm & Save",callback_data:"ai_confirm"},{text:"❌ Cancel",callback_data:"ai_cancel"}]] } });
       return;
     }
 
@@ -837,7 +837,7 @@ async function handleUpdate(update, io) {
       await reply(chatId,
         "🏫 <b>Smart Classroom Admin Bot</b>\n\n" +
         "/status — classroom status\n/select — Class → Subject → Chapter चुनें\n/next — अगला सवाल\n/prev — पिछला सवाल\n/answer — उत्तर दिखाएँ\n/hide — उत्तर छिपाएँ\n" +
-        "/list — questions की सूची\n/add — नया question जोड़ें\n/generate — Gemini से MCQ बनाएं\n/csv — CSV import format\n/csvtemplate — sample CSV डाउनलोड करें\n/backup — JSON + CSV backup भेजें\n/restore — JSON backup restore करें\n/edit — question बदलें\n/delete ID — question हटाएँ\n\n" +
+        "/list — questions की सूची\n/add — नया question जोड़ें\n/generate — OpenRouter AI से MCQ बनाएं\n/csv — CSV import format\n/csvtemplate — sample CSV डाउनलोड करें\n/backup — JSON + CSV backup भेजें\n/restore — JSON backup restore करें\n/edit — question बदलें\n/delete ID — question हटाएँ\n\n" +
         "<b>/add format:</b>\n<code>/add Class 8 | Science | Light | प्रकाश क्या है? | What is light? | A | B | C | D | B | Explanation</code>\n" +
         "<b>/edit format:</b>\n<code>/edit ID | Class 8 | Science | Light | ...same fields...</code>"
       );
@@ -951,9 +951,8 @@ async function configureWebhook() {
       { command: "csv", description: "Preview and import CSV questions" },
       { command: "csvtemplate", description: "Download sample CSV template" },
       { command: "backup", description: "Export question bank JSON and CSV" },
-      { command: "generate", description: "Generate MCQs with Gemini AI" },
+      { command: "generate", description: "Generate MCQs with OpenRouter AI AI" },
       { command: "quiz", description: "Start current question quiz in class group" },
-      { command: "quiznext", description: "Teacher sends the next quiz question" },
       { command: "quizstop", description: "Stop the active class quiz" },
       { command: "restore", description: "Restore questions from JSON backup" },
       { command: "edit", description: "Edit a question" },
