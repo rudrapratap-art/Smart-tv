@@ -651,8 +651,14 @@ async function handleUpdate(update, io) {
   if (!message || (!message.text && !message.document)) return;
   const chatId = message.chat.id;
   const senderId = String(message.from?.id || "");
-  if (!ADMIN_ID || senderId !== ADMIN_ID) {
-    await reply(chatId, "⛔ यह bot केवल authorized admin के लिए है।");
+  const rawText = String(message.text || "").trim();
+  const publicQuizText = rawText === "📝 Start Quiz" ? "/quiz" : rawText;
+  const publicQuizCommand = publicQuizText.split(/\\s+/)[0].split("@")[0].toLowerCase();
+  const isGroupChat = ["group", "supergroup"].includes(message.chat.type);
+  const canStartPublicQuiz = isGroupChat && publicQuizCommand === "/quiz";
+  const isAdmin = Boolean(ADMIN_ID) && senderId === ADMIN_ID;
+  if (!isAdmin && !canStartPublicQuiz) {
+    await reply(chatId, "⛔ यह action केवल authorized admin के लिए है।\nQuiz शुरू करने के लिए Group में /quiz भेजें।");
     return;
   }
 
