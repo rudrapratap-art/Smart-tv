@@ -911,8 +911,8 @@ async function handleUpdate(update, io) {
 
     if (["/next", "/prev", "/answer", "/hide"].includes(command)) {
       if (!activeQuestions.length) throw new Error("इस selection में कोई question नहीं है। 🎓 Select Questions से नया Chapter चुनें।");
-      if (command === "/next") state.index = Math.min(activeQuestions.length - 1, state.index + 1);
-      if (command === "/prev") state.index = Math.max(0, state.index - 1);
+      if (command === "/next") { state.index = Math.min(activeQuestions.length - 1, state.index + 1); state.showAnswer = false; }
+      if (command === "/prev") { state.index = Math.max(0, state.index - 1); state.showAnswer = false; }
       if (command === "/answer") state.showAnswer = true;
       if (command === "/hide") state.showAnswer = false;
       state.questions = activeQuestions;
