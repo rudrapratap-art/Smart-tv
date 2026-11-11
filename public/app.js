@@ -204,11 +204,12 @@ $("timerPause").onclick=()=>{clearInterval(timer);timer=null};$("timerReset").on
 $("saveSettings").onclick=()=>{
  localStorage.setItem("sc_language",$("displayLanguage").value);
  localStorage.setItem("sc_order",$("questionOrder").value);
+ const dark=!!$("darkMode")?.checked;document.body.classList.toggle("dark-mode",dark);localStorage.setItem("sc_dark_mode",dark?"1":"0");
  const adminKey=$("adminApiKey")?.value.trim()||"";
  if(adminKey)localStorage.setItem("sc_admin_key",adminKey);else localStorage.removeItem("sc_admin_key");
  broadcast();toast("Settings saved");
 };
-$("displayLanguage").value=localStorage.getItem("sc_language")||"both";$("questionOrder").value=localStorage.getItem("sc_order")||"normal";if($("adminApiKey"))$("adminApiKey").value=localStorage.getItem("sc_admin_key")||"";
+$("displayLanguage").value=localStorage.getItem("sc_language")||"both";$("questionOrder").value=localStorage.getItem("sc_order")||"normal";if($("adminApiKey"))$("adminApiKey").value=localStorage.getItem("sc_admin_key")||"";const darkModeEnabled=localStorage.getItem("sc_dark_mode")==="1";document.body.classList.toggle("dark-mode",darkModeEnabled);if($("darkMode"))$("darkMode").checked=darkModeEnabled;
 window.addEventListener("keydown",e=>{if(document.activeElement.matches("input,textarea,select"))return;if(e.key==="ArrowRight")move(1);if(e.key==="ArrowLeft")move(-1);if(e.key==="Enter"||e.key===" ") {showAnswer=!showAnswer;broadcast();}});
 renderList();renderController();bootstrapRemote();
 // Upgrade v2: CSV import/export and student performance
