@@ -263,7 +263,7 @@ if($("markCorrect"))$("markCorrect").onclick=()=>recordScore(true);
 if($("markWrong"))$("markWrong").onclick=()=>recordScore(false);
 if($("clearScores"))$("clearScores").onclick=()=>{if(confirm("सभी score records हटाएँ?")){scores=[];saveScores();toast("Score records cleared")}};
 if($("scorePeriod"))$("scorePeriod").onchange=renderScores;
-if($("exportScores"))$("exportScores").onclick=()=>{const rows=[["Student","Correct","Question","Class","Subject","Time"],...scores.map(x=>[x.name,x.correct?"Yes":"No",x.question,x.class,x.subject,x.time])];const csv=rows.map(r=>r.map(csvCell).join(",")).join("\r\n");const url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));const link=document.createElement("a");link.href=url;link.download="smart-classroom-performance.csv";link.click();URL.revokeObjectURL(url)};
+if($("exportScores"))$("exportScores").onclick=()=>{const period=$("scorePeriod")?.value||"all";const cutoff=period==="all"?0:Date.now()-Number(period)*86400000;const report=scores.filter(x=>!cutoff||!Number.isFinite(Date.parse(x.time||""))||Date.parse(x.time)>=cutoff);const rows=[["Student","Correct","Question","Class","Subject","Time"],...report.map(x=>[x.name,x.correct?"Yes":"No",x.question,x.class,x.subject,x.time])];const csv=rows.map(r=>r.map(csvCell).join(",")).join("\r\n");const url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));const link=document.createElement("a");link.href=url;link.download="smart-classroom-performance.csv";link.click();URL.revokeObjectURL(url)};
 function csvCell(v){return '"'+String(v??"").replace(/"/g,'""')+'"'}
 if($("exportCsv"))$("exportCsv").onclick=()=>{
  const header=["class","subject","chapter","hi","en","A","B","C","D","answer","explain"];
