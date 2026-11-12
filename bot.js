@@ -81,7 +81,7 @@ async function sendQuizQuestion(chatId, room, run) {
     text: String.fromCharCode(65 + index) + ". " + String(option).slice(0, 55),
     callback_data: "qz:" + quiz.id + ":" + index
   }]);
-  run.deadline = Date.now() + QUIZ_QUESTION_SECONDS * 1000;
+  run.deadline = Date.now() + (run.quizTimePerQuestion || QUIZ_QUESTION_SECONDS) * 1000;
   run.messageText = "📝 <b>SMART CLASSROOM LIVE QUIZ</b>\n\n" +
     "🎓 " + escapeHtml(q.cls) + " • " + escapeHtml(q.subject) + "\n" +
     "📖 " + escapeHtml(q.chapter) + "\n" +
@@ -136,7 +136,7 @@ async function sendQuizQuestion(chatId, room, run) {
     } catch (error) {
       console.error("Quiz answer reveal:", error.message);
     }
-  }, QUIZ_QUESTION_SECONDS * 1000);
+  }, (run.quizTimePerQuestion || QUIZ_QUESTION_SECONDS) * 1000);
 }
 
 async function finishQuizRun(chatId, room, run, stopped = false) {
@@ -542,7 +542,7 @@ async function handleUpdate(update, io) {
       try {
         const activeQuiz = await db.getActiveTelegramQuiz(chatId);
         const createdAt = Date.parse(activeQuiz?.created_at || "");
-        const expiredByDatabase = Number.isFinite(createdAt) && Date.now() - createdAt > QUIZ_QUESTION_SECONDS * 1000;
+        const expiredByDatabase = Number.isFinite(createdAt) && Date.now() - createdAt > (activeRun?.quizTimePerQuestion || QUIZ_QUESTION_SECONDS) * 1000;
         const activeRun = activeQuizRuns.get(String(chatId));
         const expiredByRun = Boolean(activeRun?.deadline && Date.now() > activeRun.deadline);
         if (!activeQuiz || activeQuiz.id !== quizId || expiredByDatabase || expiredByRun) {
@@ -790,11 +790,12 @@ async function handleUpdate(update, io) {
       const previousRun = activeQuizRuns.get(String(chatId));
       if (previousRun) await finishQuizRun(chatId, room, previousRun, true);
       const quizRoom = `${room}_${chatId}`;
-      const run = { room: quizRoom, questions: candidates, index: 0, quizIds: [], timer: null, countdownTimer: null, revealTimer: null, stopped: false };
+      const run = { room: quizRoom, questions: candidates, index: 0, quizIds: [], timer: null, countdownTimer: null, revealTimer: null, stopped: false, quizTimePerQuestion: state.quizTimePerQuestion || QUIZ_QUESTION_SECONDS };
       activeQuizRuns.set(String(chatId), run);
       await db.saveTelegramQuizSession({ chat_id: String(chatId), room: quizRoom, questions: candidates, current_index: 0, active: true, status: "asking" });
       await sendQuizQuestion(chatId, quizRoom, run);
-      await telegram("sendMessage", { chat_id: chatId, text: "✅ Automatic Quiz शुरू हो गया। हर सवाल के लिए 30 सेकंड हैं।" });
+      const pqSeconds = state.quizTimePerQuestion || QUIZ_QUESTION_SECONDS;
+      await telegram("sendMessage", { chat_id: chatId, text: "✅ Automatic Quiz शुरू हो गया। हर सवाल के लिए " + pqSeconds + " सेकंड हैं।" });
       return;
     }
 
@@ -846,10 +847,10 @@ async function handleUpdate(update, io) {
         "🏫 <b>Smart Classroom Admin Bot</b>\n\n" +
         "/status — classroom status\n/select — Class → Subject → Chapter चुनें\n/next — अगला सवाल\n/prev — पिछला सवाल\n/answer — उत्तर दिखाएँ\n/hide — उत्तर छिपाएँ\n" +
         "/list — questions की सूची\n/add — नया question जोड़ें\n/generate — OpenRouter AI से MCQ बनाएं\n/csv — CSV import format\n/csvtemplate — sample CSV डाउनलोड करें\n/backup — JSON + CSV backup भेजें\n/restore — JSON backup restore करें\n/edit — question बदलें\n/delete ID — question हटाएँ\n" +
-        "/setduration मिनट — क्विज़ अवधि सेट करें\n/setquestions संख्या — क्विज़ में सवालों की संख्या\n/quizstart — क्विज़ शुरू करें\n/quizstop — क्विज़ रोकें\n/quizstatus — क्विज़ स्थिति\n\n" +
+        "/setduration मिनट — क्विज़ अवधि सेट करें\n/setquestions संख्या — क्विज़ में सवालों की संख्या\n/setptime सेकंड — प्रति सवाल समय सीमा\n/quizstart — क्विज़ शुरू करें\n/quizstop — क्विज़ रोकें\n/quizstatus — क्विज़ स्थिति\n\n" +
         "<b>/add format:</b>\n<code>/add Class 8 | Science | Light | प्रकाश क्या है? | What is light? | A | B | C | D | B | Explanation</code>\n" +
         "<b>/edit format:</b>\n<code>/edit ID | Class 8 | Science | Light | ...same fields...</code>\n" +
-        "<b>Quiz example:</b>\n<code>/setduration 30</code>\n<code>/setquestions 10</code>\n<code>/quizstart</code>"
+        "<b>Quiz example:</b>\n<code>/setduration 30</code>\n<code>/setquestions 10</code>\n<code>/setptime 20</code>\n<code>/quizstart</code>"
       );
       return;
     }
@@ -934,6 +935,15 @@ async function handleUpdate(update, io) {
       state.quizQuestionCount = state.quizQuestionCount || 0;
       await publish(io, room, state);
       await reply(chatId, `⏱ क्विज़ अवधि सेट हो गई: ${minutes} मिनट`);
+      return;
+    }
+
+    if (command === "/setptime") {
+      const seconds = Number(arg);
+      if (!Number.isFinite(seconds) || seconds < 5 || seconds > 300) throw new Error("Usage: /setptime 5–300 (प्रति सवाल सेकंड में)");
+      state.quizTimePerQuestion = seconds;
+      await publish(io, room, state);
+      await reply(chatId, `⏱ प्रति सवाल समय सेट हो गया: ${seconds} सेकंड`);
       return;
     }
 
@@ -1043,6 +1053,7 @@ async function configureWebhook() {
       { command: "delete", description: "Delete a question" },
       { command: "setduration", description: "Set quiz duration in minutes" },
       { command: "setquestions", description: "Set number of quiz questions" },
+      { command: "setptime", description: "Set per-question time in seconds" },
       { command: "quizstart", description: "Start the timed quiz" },
       { command: "quizstop", description: "Stop the quiz" },
       { command: "quizstatus", description: "Show quiz status" }
