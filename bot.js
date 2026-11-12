@@ -542,8 +542,8 @@ async function handleUpdate(update, io) {
       try {
         const activeQuiz = await db.getActiveTelegramQuiz(chatId);
         const createdAt = Date.parse(activeQuiz?.created_at || "");
-        const expiredByDatabase = Number.isFinite(createdAt) && Date.now() - createdAt > (activeRun?.quizTimePerQuestion || QUIZ_QUESTION_SECONDS) * 1000;
         const activeRun = activeQuizRuns.get(String(chatId));
+        const expiredByDatabase = Number.isFinite(createdAt) && Date.now() - createdAt > (activeRun?.quizTimePerQuestion || QUIZ_QUESTION_SECONDS) * 1000;
         const expiredByRun = Boolean(activeRun?.deadline && Date.now() > activeRun.deadline);
         if (!activeQuiz || activeQuiz.id !== quizId || expiredByDatabase || expiredByRun) {
           await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "यह Quiz बंद हो चुका है।", show_alert: true });
@@ -790,11 +790,11 @@ async function handleUpdate(update, io) {
       const previousRun = activeQuizRuns.get(String(chatId));
       if (previousRun) await finishQuizRun(chatId, room, previousRun, true);
       const quizRoom = `${room}_${chatId}`;
-      const run = { room: quizRoom, questions: candidates, index: 0, quizIds: [], timer: null, countdownTimer: null, revealTimer: null, stopped: false, quizTimePerQuestion: state.quizTimePerQuestion || QUIZ_QUESTION_SECONDS };
+      const run = { room: quizRoom, questions: candidates, index: 0, quizIds: [], timer: null, countdownTimer: null, revealTimer: null, stopped: false, quizTimePerQuestion: saved.quizTimePerQuestion || QUIZ_QUESTION_SECONDS };
       activeQuizRuns.set(String(chatId), run);
       await db.saveTelegramQuizSession({ chat_id: String(chatId), room: quizRoom, questions: candidates, current_index: 0, active: true, status: "asking" });
       await sendQuizQuestion(chatId, quizRoom, run);
-      const pqSeconds = state.quizTimePerQuestion || QUIZ_QUESTION_SECONDS;
+      const pqSeconds = saved.quizTimePerQuestion || QUIZ_QUESTION_SECONDS;
       await telegram("sendMessage", { chat_id: chatId, text: "✅ Automatic Quiz शुरू हो गया। हर सवाल के लिए " + pqSeconds + " सेकंड हैं।" });
       return;
     }
