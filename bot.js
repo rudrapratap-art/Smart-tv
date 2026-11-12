@@ -845,9 +845,11 @@ async function handleUpdate(update, io) {
       await reply(chatId,
         "🏫 <b>Smart Classroom Admin Bot</b>\n\n" +
         "/status — classroom status\n/select — Class → Subject → Chapter चुनें\n/next — अगला सवाल\n/prev — पिछला सवाल\n/answer — उत्तर दिखाएँ\n/hide — उत्तर छिपाएँ\n" +
-        "/list — questions की सूची\n/add — नया question जोड़ें\n/generate — OpenRouter AI से MCQ बनाएं\n/csv — CSV import format\n/csvtemplate — sample CSV डाउनलोड करें\n/backup — JSON + CSV backup भेजें\n/restore — JSON backup restore करें\n/edit — question बदलें\n/delete ID — question हटाएँ\n\n" +
+        "/list — questions की सूची\n/add — नया question जोड़ें\n/generate — OpenRouter AI से MCQ बनाएं\n/csv — CSV import format\n/csvtemplate — sample CSV डाउनलोड करें\n/backup — JSON + CSV backup भेजें\n/restore — JSON backup restore करें\n/edit — question बदलें\n/delete ID — question हटाएँ\n" +
+        "/setduration मिनट — क्विज़ अवधि सेट करें\n/setquestions संख्या — क्विज़ में सवालों की संख्या\n/quizstart — क्विज़ शुरू करें\n/quizstop — क्विज़ रोकें\n/quizstatus — क्विज़ स्थिति\n\n" +
         "<b>/add format:</b>\n<code>/add Class 8 | Science | Light | प्रकाश क्या है? | What is light? | A | B | C | D | B | Explanation</code>\n" +
-        "<b>/edit format:</b>\n<code>/edit ID | Class 8 | Science | Light | ...same fields...</code>"
+        "<b>/edit format:</b>\n<code>/edit ID | Class 8 | Science | Light | ...same fields...</code>\n" +
+        "<b>Quiz example:</b>\n<code>/setduration 30</code>\n<code>/setquestions 10</code>\n<code>/quizstart</code>"
       );
       return;
     }
@@ -925,6 +927,58 @@ async function handleUpdate(update, io) {
       return;
     }
 
+    if (command === "/setduration") {
+      const minutes = Number(arg);
+      if (!Number.isFinite(minutes) || minutes < 1 || minutes > 480) throw new Error("Usage: /setduration 1–480 (मिनट में)");
+      state.quizDuration = minutes;
+      state.quizQuestionCount = state.quizQuestionCount || 0;
+      await publish(io, room, state);
+      await reply(chatId, `⏱ क्विज़ अवधि सेट हो गई: ${minutes} मिनट`);
+      return;
+    }
+
+    if (command === "/setquestions") {
+      const count = Number(arg);
+      if (!Number.isFinite(count) || count < 1 || count > 500) throw new Error("Usage: /setquestions 1–500");
+      if (!questions.length) throw new Error("Question Bank खाली है। पहले /add करें।");
+      if (count > questions.length) throw new Error(`बैंक में केवल ${questions.length} सवाल उपलब्ध हैं।`);
+      state.quizQuestionCount = count;
+      state.quizDuration = state.quizDuration || 0;
+      await publish(io, room, state);
+      await reply(chatId, `📋 क्विज़ में सवालों की संख्या सेट हो गई: ${count}`);
+      return;
+    }
+
+    if (command === "/quizstart") {
+      if (!questions.length) throw new Error("Question Bank खाली है। पहले /add करें।");
+      if (!state.quizQuestionCount || state.quizQuestionCount < 1) throw new Error("पहले /setquestions से सवालों की संख्या सेट करें।");
+      if (state.quizQuestionCount > questions.length) throw new Error("सवालों की संख्या बैंक से अधिक है।");
+      state.quizActive = true;
+      state.quizStartedAt = new Date().toISOString();
+      state.quizTimeLeft = (state.quizDuration || 0) * 60;
+      state.index = 0;
+      state.showAnswer = false;
+      state.questions = questions.slice(0, state.quizQuestionCount);
+      await publish(io, room, state);
+      const timerText = state.quizDuration > 0 ? `, समय: ${state.quizDuration} मिनट` : "";
+      await reply(chatId, `🚀 क्विज़ शुरू हो गया!\nसवाल: ${state.quizQuestionCount}${timerText}\nTV पर पहला सवाल दिखाया जा रहा है।`);
+      return;
+    }
+
+    if (command === "/quizstatus") {
+      const active = state.quizActive ? "चालू है ✅" : "बंद है ❌";
+      const remaining = state.quizTimeLeft > 0 ? Math.ceil(state.quizTimeLeft / 60) + " मिनट बचा" : "सेट नहीं";
+      await reply(chatId,
+        "📊 <b>क्विज़ स्थिति</b>\n\n" +
+        "सक्रिय: " + active + "\n" +
+        "सवालों की संख्या: " + (state.quizQuestionCount || "सेट नहीं") + "\n" +
+        "अवधि: " + (state.quizDuration || "सेट नहीं") + " मिनट\n" +
+        "समय बचा: " + remaining + "\n" +
+        "वर्तमान सवाल: " + (state.index + 1) + " / " + (state.quizActive ? state.quizQuestionCount : questions.length)
+      );
+      return;
+    }
+
     await reply(chatId, "Command समझ नहीं आया। /help भेजें।");
   } catch (error) {
     console.error("Telegram bot:", error.message);
@@ -986,7 +1040,12 @@ async function configureWebhook() {
       { command: "quizstop", description: "Stop the active class quiz" },
       { command: "restore", description: "Restore questions from JSON backup" },
       { command: "edit", description: "Edit a question" },
-      { command: "delete", description: "Delete a question" }
+      { command: "delete", description: "Delete a question" },
+      { command: "setduration", description: "Set quiz duration in minutes" },
+      { command: "setquestions", description: "Set number of quiz questions" },
+      { command: "quizstart", description: "Start the timed quiz" },
+      { command: "quizstop", description: "Stop the quiz" },
+      { command: "quizstatus", description: "Show quiz status" }
     ]
   });
   console.log("Telegram webhook registered.");
