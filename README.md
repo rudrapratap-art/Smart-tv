@@ -34,6 +34,11 @@ Set these in Render Dashboard → your Web Service → Environment:
 - `/add Class 8 | Science | Chapter | Hindi question | English question | A | B | C | D | Answer(A-D) | Explanation`
 - `/edit QUESTION_ID | Class 8 | Science | Chapter | Hindi question | English question | A | B | C | D | Answer(A-D) | Explanation`
 - `/delete QUESTION_ID`
+- `/setduration <minutes>` — set quiz duration (1–480 minutes)
+- `/setquestions <count>` — set number of questions in quiz (1–500)
+- `/quizstart` — start the timed quiz with configured settings
+- `/quizstop` — stop the quiz and return to normal mode
+- `/quizstatus` — show quiz configuration and remaining time
 
 The bot is restricted to the Telegram user ID configured in `TELEGRAM_ADMIN_ID`. The webhook endpoint checks Telegram's secret-token header. The Supabase service key is used only on the Node server.
 
