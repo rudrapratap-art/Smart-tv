@@ -93,7 +93,15 @@ async function sendQuizQuestion(chatId, room, run) {
     "<b>" + escapeHtml(questionText) + "</b>";
   const sentMessage = await telegram("sendMessage", {
     chat_id: chatId, text: run.messageText, parse_mode: "HTML",
-    reply_markup: { inline_keyboard: keyboard }
+    reply_markup: {
+      inline_keyboard: keyboard,
+      // While a group quiz is active, replace the large admin keyboard
+      // with one compact stop control so it does not cover the chat.
+      keyboard: [[{ text: "🛑 Quiz Stop" }]],
+      resize_keyboard: true,
+      is_persistent: true,
+      input_field_placeholder: "Quiz चल रहा है…"
+    }
   });
   run.messageId = sentMessage.message_id;
   run.countdownTimer = setInterval(async () => {
@@ -186,7 +194,8 @@ async function finishQuizRun(chatId, room, run, stopped = false) {
       "\n👥 कुल उत्तर: <b>" + totalAnswers + "</b>" +
       "\n✅ सही उत्तर: <b>" + correctAnswers + "</b>" +
       "\n❌ गलत उत्तर: <b>" + (totalAnswers-correctAnswers) + "</b>" + rankingText,
-    parse_mode: "HTML"
+    parse_mode: "HTML",
+    reply_markup: secondKeyboard
   });
 }
 function csvCell(value) {
@@ -692,6 +701,7 @@ async function handleUpdate(update, io) {
       "💾 Backup": "/backup",
       "📲 Start Group Quiz": "/quiz",
       "🛑 Stop Group Quiz": "/quizstop",
+      "🛑 Quiz Stop": "/quizstop",
       "📺 Start TV Quiz": "/quizstart",
       "📊 TV Quiz Status": "/quizstatus",
       "♻️ Restore": "/restore",
