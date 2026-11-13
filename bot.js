@@ -36,10 +36,9 @@ const mainKeyboard = {
 };
 
 const secondKeyboard = {
-  // Quiz controls are clearly separated by destination: Telegram group vs TV.
+  // Telegram group quiz and question-bank tools only.
   keyboard: [
-    [{ text: "📲 Start Group Quiz" }, { text: "🛑 Stop Group Quiz" }],
-    [{ text: "📺 Start TV Quiz" }, { text: "📊 TV Quiz Status" }],
+    [{ text: "📲 Start Group Quiz" }],
     [{ text: "💾 Backup" }, { text: "♻️ Restore" }],
     [{ text: "📄 CSV Help" }, { text: "📥 CSV Template" }],
     [{ text: "⬅️ Main Menu" }]
@@ -160,6 +159,7 @@ async function finishQuizRun(chatId, room, run, stopped = false) {
   if (run.timer) clearTimeout(run.timer);
   if (run.countdownTimer) clearInterval(run.countdownTimer);
   if (run.revealTimer) clearTimeout(run.revealTimer);
+  if (run.durationTimer) clearTimeout(run.durationTimer);
   if (run.messageId) {
     await telegram("editMessageReplyMarkup", {
       chat_id: chatId, message_id: run.messageId,
@@ -200,7 +200,7 @@ async function finishQuizRun(chatId, room, run, stopped = false) {
       "\n✅ सही उत्तर: <b>" + correctAnswers + "</b>" +
       "\n❌ गलत उत्तर: <b>" + (totalAnswers-correctAnswers) + "</b>" + rankingText,
     parse_mode: "HTML",
-    reply_markup: secondKeyboard
+    reply_markup: mainKeyboard
   });
 }
 function csvCell(value) {
@@ -705,10 +705,7 @@ async function handleUpdate(update, io) {
       "🙈 Hide Answer": "/hide",
       "💾 Backup": "/backup",
       "📲 Start Group Quiz": "/quiz",
-      "🛑 Stop Group Quiz": "/quizstop",
       "🛑 Quiz Stop": "/quizstop",
-      "📺 Start TV Quiz": "/quizstart",
-      "📊 TV Quiz Status": "/quizstatus",
       "♻️ Restore": "/restore",
       "📄 CSV Help": "/csv",
       "📥 CSV Template": "/csvtemplate",
@@ -822,13 +819,29 @@ async function handleUpdate(update, io) {
       const previousRun = activeQuizRuns.get(String(chatId));
       if (previousRun) await finishQuizRun(chatId, room, previousRun, true);
       const quizRoom = `${room}_${chatId}`;
-      const run = { room: quizRoom, questions: telegramQuestions, index: 0, quizIds: [], timer: null, countdownTimer: null, revealTimer: null, stopped: false, quizTimePerQuestion: saved.quizTimePerQuestion || QUIZ_QUESTION_SECONDS };
+      const pqSeconds = Number(saved.telegramQuizTimePerQuestion || saved.quizTimePerQuestion || QUIZ_QUESTION_SECONDS);
+      const durationMinutes = Number(saved.telegramQuizDurationMinutes || 0);
+      const run = {
+        room: quizRoom, questions: telegramQuestions, index: 0, quizIds: [],
+        timer: null, countdownTimer: null, revealTimer: null, durationTimer: null,
+        stopped: false, quizTimePerQuestion: pqSeconds
+      };
       activeQuizRuns.set(String(chatId), run);
       await db.saveTelegramQuizSession({ chat_id: String(chatId), room: quizRoom, questions: telegramQuestions, current_index: 0, active: true, status: "asking" });
       await showQuizStopKeyboard(chatId);
+      if (durationMinutes > 0) {
+        run.durationTimer = setTimeout(() => {
+          if (!run.stopped && activeQuizRuns.get(String(chatId)) === run) {
+            finishQuizRun(chatId, quizRoom, run, true).catch(error => console.error("Quiz duration stop:", error.message));
+          }
+        }, durationMinutes * 60 * 1000);
+      }
       await sendQuizQuestion(chatId, quizRoom, run);
-      const pqSeconds = saved.quizTimePerQuestion || QUIZ_QUESTION_SECONDS;
-      await telegram("sendMessage", { chat_id: chatId, text: "✅ Automatic Quiz शुरू हो गया। हर सवाल के लिए " + pqSeconds + " सेकंड हैं।" });
+      await telegram("sendMessage", {
+        chat_id: chatId,
+        text: "✅ Telegram Group Quiz शुरू हो गया। हर सवाल: " + pqSeconds + " सेकंड" +
+          (durationMinutes > 0 ? "\nकुल अवधि: " + durationMinutes + " मिनट" : "")
+      });
       return;
     }
 
@@ -886,10 +899,10 @@ async function handleUpdate(update, io) {
         "🏫 <b>Smart Classroom Admin Bot</b>\n\n" +
         "/status — classroom status\n/select — Class → Subject → Chapter चुनें\n/next — अगला सवाल\n/prev — पिछला सवाल\n/answer — उत्तर दिखाएँ\n/hide — उत्तर छिपाएँ\n" +
         "/list — questions की सूची\n/add — नया question जोड़ें\n/generate — OpenRouter AI से MCQ बनाएं\n/csv — CSV import format\n/csvtemplate — sample CSV डाउनलोड करें\n/backup — JSON + CSV backup भेजें\n/restore — JSON backup restore करें\n/edit — question बदलें\n/delete ID — question हटाएँ\n" +
-        "/setduration मिनट — क्विज़ अवधि सेट करें\n/setquestions संख्या — क्विज़ में सवालों की संख्या\n/setptime सेकंड — प्रति सवाल समय सीमा\n/quizstart — क्विज़ शुरू करें\n/quizstop — क्विज़ रोकें\n/quizstatus — क्विज़ स्थिति\n\n" +
+        "/setduration मिनट — Telegram Group Quiz की कुल अवधि\n/setquestions संख्या — Telegram Group Quiz में सवालों की संख्या\n/setptime सेकंड — Telegram Group Quiz में प्रति सवाल समय\n/quiz — Telegram Group में Quiz शुरू करें\n/quizstop — Telegram Group Quiz रोकें\n\n" +
         "<b>/add format:</b>\n<code>/add Class 8 | Science | Light | प्रकाश क्या है? | What is light? | A | B | C | D | B | Explanation</code>\n" +
         "<b>/edit format:</b>\n<code>/edit ID | Class 8 | Science | Light | ...same fields...</code>\n" +
-        "<b>Quiz example:</b>\n<code>/setduration 30</code>\n<code>/setquestions 10</code>\n<code>/setptime 20</code>\n<code>/quizstart</code>"
+        "<b>Quiz example:</b>\n<code>/setduration 30</code>\n<code>/setquestions 10</code>\n<code>/setptime 20</code>\n<code>/quiz</code>"
       );
       return;
     }
@@ -970,19 +983,18 @@ async function handleUpdate(update, io) {
     if (command === "/setduration") {
       const minutes = Number(arg);
       if (!Number.isFinite(minutes) || minutes < 1 || minutes > 480) throw new Error("Usage: /setduration 1–480 (मिनट में)");
-      state.quizDuration = minutes;
-      state.quizQuestionCount = state.quizQuestionCount || 0;
+      state.telegramQuizDurationMinutes = minutes;
       await publish(io, room, state);
-      await reply(chatId, `⏱ क्विज़ अवधि सेट हो गई: ${minutes} मिनट`);
+      await reply(chatId, `📲 Telegram Group Quiz की कुल अवधि सेट हो गई: ${minutes} मिनट`);
       return;
     }
 
     if (command === "/setptime") {
       const seconds = Number(arg);
       if (!Number.isFinite(seconds) || seconds < 5 || seconds > 300) throw new Error("Usage: /setptime 5–300 (प्रति सवाल सेकंड में)");
-      state.quizTimePerQuestion = seconds;
+      state.telegramQuizTimePerQuestion = seconds;
       await publish(io, room, state);
-      await reply(chatId, `⏱ प्रति सवाल समय सेट हो गया: ${seconds} सेकंड`);
+      await reply(chatId, `📲 Telegram Group Quiz में प्रति सवाल समय: ${seconds} सेकंड`);
       return;
     }
 
@@ -991,43 +1003,9 @@ async function handleUpdate(update, io) {
       if (!Number.isFinite(count) || count < 1 || count > 500) throw new Error("Usage: /setquestions 1–500");
       if (!questions.length) throw new Error("Question Bank खाली है। पहले /add करें।");
       if (count > questions.length) throw new Error(`बैंक में केवल ${questions.length} सवाल उपलब्ध हैं।`);
-      // This command configures both quiz modes. Keep distinct fields so the
-      // Telegram group quiz and TV quiz can evolve independently afterwards.
-      state.quizQuestionCount = count; // TV quiz (/quizstart)
-      state.telegramQuizQuestionCount = count; // Telegram group quiz (/quiz)
-      state.quizDuration = state.quizDuration || 0;
+      state.telegramQuizQuestionCount = count;
       await publish(io, room, state);
-      await reply(chatId, `📋 सवालों की संख्या सेट हो गई: ${count}\n📺 TV Quiz: ${count} सवाल\n📲 Telegram Group Quiz: ${count} सवाल`);
-      return;
-    }
-
-    if (command === "/quizstart") {
-      if (!questions.length) throw new Error("Question Bank खाली है। पहले /add करें।");
-      if (!state.quizQuestionCount || state.quizQuestionCount < 1) throw new Error("पहले /setquestions से सवालों की संख्या सेट करें।");
-      if (state.quizQuestionCount > questions.length) throw new Error("सवालों की संख्या बैंक से अधिक है।");
-      state.quizActive = true;
-      state.quizStartedAt = new Date().toISOString();
-      state.quizTimeLeft = (state.quizDuration || 0) * 60;
-      state.index = 0;
-      state.showAnswer = false;
-      state.questions = questions.slice(0, state.quizQuestionCount);
-      await publish(io, room, state);
-      const timerText = state.quizDuration > 0 ? `, समय: ${state.quizDuration} मिनट` : "";
-      await reply(chatId, `🚀 क्विज़ शुरू हो गया!\nसवाल: ${state.quizQuestionCount}${timerText}\nTV पर पहला सवाल दिखाया जा रहा है।`);
-      return;
-    }
-
-    if (command === "/quizstatus") {
-      const active = state.quizActive ? "चालू है ✅" : "बंद है ❌";
-      const remaining = state.quizTimeLeft > 0 ? Math.ceil(state.quizTimeLeft / 60) + " मिनट बचा" : "सेट नहीं";
-      await reply(chatId,
-        "📊 <b>क्विज़ स्थिति</b>\n\n" +
-        "सक्रिय: " + active + "\n" +
-        "सवालों की संख्या: " + (state.quizQuestionCount || "सेट नहीं") + "\n" +
-        "अवधि: " + (state.quizDuration || "सेट नहीं") + " मिनट\n" +
-        "समय बचा: " + remaining + "\n" +
-        "वर्तमान सवाल: " + (state.index + 1) + " / " + (state.quizActive ? state.quizQuestionCount : questions.length)
-      );
+      await reply(chatId, `📋 Telegram Group Quiz के लिए सवालों की संख्या सेट हो गई: ${count}`);
       return;
     }
 
@@ -1051,8 +1029,22 @@ async function recoverActiveQuizRuns() {
     }
     try {
       await db.stopTelegramQuiz(session.room);
-      const run = { room: session.room, questions, index, quizIds: [], timer: null, countdownTimer: null, revealTimer: null, stopped: false };
+      const settings = await getState(DEFAULT_ROOM, await db.getQuestions());
+      const run = {
+        room: session.room, questions, index, quizIds: [],
+        timer: null, countdownTimer: null, revealTimer: null, durationTimer: null,
+        stopped: false,
+        quizTimePerQuestion: Number(settings.telegramQuizTimePerQuestion || QUIZ_QUESTION_SECONDS)
+      };
       activeQuizRuns.set(chatId, run);
+      const durationMinutes = Number(settings.telegramQuizDurationMinutes || 0);
+      if (durationMinutes > 0) {
+        run.durationTimer = setTimeout(() => {
+          if (!run.stopped && activeQuizRuns.get(chatId) === run) {
+            finishQuizRun(chatId, session.room, run, true).catch(error => console.error("Recovered quiz duration stop:", error.message));
+          }
+        }, durationMinutes * 60 * 1000);
+      }
       await telegram("sendMessage", { chat_id: chatId, text: "🔄 <b>Bot restart के बाद Quiz फिर से शुरू हुआ है।</b> वर्तमान प्रश्न का timer 30 सेकंड से शुरू होगा।", parse_mode: "HTML" });
       await showQuizStopKeyboard(chatId);
       await sendQuizQuestion(chatId, session.room, run);
@@ -1094,12 +1086,10 @@ async function configureWebhook() {
       { command: "restore", description: "Restore questions from JSON backup" },
       { command: "edit", description: "Edit a question" },
       { command: "delete", description: "Delete a question" },
-      { command: "setduration", description: "Set quiz duration in minutes" },
-      { command: "setquestions", description: "Set number of quiz questions" },
-      { command: "setptime", description: "Set per-question time in seconds" },
-      { command: "quizstart", description: "Start the timed quiz" },
-      { command: "quizstop", description: "Stop the quiz" },
-      { command: "quizstatus", description: "Show quiz status" }
+      { command: "setduration", description: "Set Telegram group quiz duration in minutes" },
+      { command: "setquestions", description: "Set Telegram group quiz question count" },
+      { command: "setptime", description: "Set Telegram group quiz seconds per question" },
+      { command: "quizstop", description: "Stop the active Telegram group quiz" }
     ]
   });
   console.log("Telegram webhook registered.");
