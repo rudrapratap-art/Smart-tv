@@ -90,7 +90,15 @@ io.on("connection", socket => {
       const questions = db.isConfigured() ? await db.getQuestions() : [];
       const saved = db.isConfigured() ? await db.getClassroomState(room) : null;
       if (saved) {
-        saved.questions = questions.length ? questions : (saved.questions || []);
+        const filter = saved.filter || {};
+        saved.questions = questions.filter(q =>
+          (!filter.cls || String(q.cls) === String(filter.cls)) &&
+          (!filter.subject || String(q.subject) === String(filter.subject)) &&
+          (!filter.chapter || String(q.chapter) === String(filter.chapter)) &&
+          (!Array.isArray(filter.subjects) || !filter.subjects.length || filter.subjects.includes(String(q.subject))) &&
+          (!Array.isArray(filter.chapters) || !filter.chapters.length || filter.chapters.includes(String(q.chapter)))
+        );
+        if (!Number.isInteger(saved.index) || saved.index < 0 || saved.index >= saved.questions.length) saved.index = 0;
         socket.emit("class-state", saved);
       } else if (questions.length) {
         socket.emit("class-state", { questions, index: 0, showAnswer: false, room, language: "both", progress: true });
@@ -100,10 +108,19 @@ io.on("connection", socket => {
     }
   });
 
-  socket.on("class-state", payload => {
-    if (!payload || typeof payload !== "object") return;
-    const room = String(payload.room || DEFAULT_ROOM).toUpperCase().slice(0, 24);
-    socket.to(room).emit("class-state", payload.state);
+  socket.on("class-state", async payload => {
+    if (!payload || typeof payload !== "object" || !payload.state || typeof payload.state !== "object") return;
+    const room = String(payload.room || payload.state.room || DEFAULT_ROOM).toUpperCase().slice(0, 24);
+    const state = { ...payload.state, room };
+    if (!Array.isArray(state.questions)) return;
+    state.index = Math.max(0, Math.min(Number(state.index) || 0, Math.max(0, state.questions.length - 1)));
+    try {
+      if (db.isConfigured()) await db.saveClassroomState(room, state);
+      io.to(room).emit("class-state", state);
+    } catch (error) {
+      console.error("Class state sync:", error.message);
+      socket.to(room).emit("class-state", state);
+    }
   });
 });
 
