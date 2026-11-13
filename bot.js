@@ -23,27 +23,30 @@ function escapeHtml(value) {
 }
 
 const mainKeyboard = {
+  // TV classroom controls
   keyboard: [
-    [{ text: "🏠 Home" }, { text: "📂 Second menu" }],
+    [{ text: "🏠 Home" }, { text: "📂 Tools Menu" }],
     [{ text: "🎓 Select Questions" }],
     [{ text: "▶️ Next" }, { text: "◀️ Previous" }],
     [{ text: "👁 Show Answer" }, { text: "🙈 Hide Answer" }]
   ],
   resize_keyboard: true,
   is_persistent: true,
-  input_field_placeholder: "Choose a classroom action…"
+  input_field_placeholder: "TV classroom controls…"
 };
 
 const secondKeyboard = {
+  // Quiz controls are clearly separated by destination: Telegram group vs TV.
   keyboard: [
+    [{ text: "📲 Start Group Quiz" }, { text: "🛑 Stop Group Quiz" }],
+    [{ text: "📺 Start TV Quiz" }, { text: "📊 TV Quiz Status" }],
     [{ text: "💾 Backup" }, { text: "♻️ Restore" }],
-    [{ text: "📝 Start Quiz" }, { text: "⏹ Stop Quiz" }],
     [{ text: "📄 CSV Help" }, { text: "📥 CSV Template" }],
-    [{ text: "⬅️ Main menu" }]
+    [{ text: "⬅️ Main Menu" }]
   ],
   resize_keyboard: true,
   is_persistent: true,
-  input_field_placeholder: "Choose a question bank action…"
+  input_field_placeholder: "Quiz and question bank tools…"
 };
 
 async function reply(chatId, text, keyboard = mainKeyboard) {
@@ -687,13 +690,15 @@ async function handleUpdate(update, io) {
       "👁 Show Answer": "/answer",
       "🙈 Hide Answer": "/hide",
       "💾 Backup": "/backup",
-      "📝 Start Quiz": "/quiz",
-      "⏹ Stop Quiz": "/quizstop",
+      "📲 Start Group Quiz": "/quiz",
+      "🛑 Stop Group Quiz": "/quizstop",
+      "📺 Start TV Quiz": "/quizstart",
+      "📊 TV Quiz Status": "/quizstatus",
       "♻️ Restore": "/restore",
       "📄 CSV Help": "/csv",
       "📥 CSV Template": "/csvtemplate",
-      "⬅️ Main menu": "/mainmenu",
-      "📂 Second menu": "/secondmenu",
+      "⬅️ Main Menu": "/mainmenu",
+      "📂 Tools Menu": "/secondmenu",
       "🎓 Select Questions": "/select",
       "⬅️ Back": "/backselect"
     };
