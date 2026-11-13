@@ -24,10 +24,10 @@ function escapeHtml(value) {
 
 const mainKeyboard = {
   keyboard: [
-    [{ text: "🏠 Home" }, { text: "🎓 Select Questions" }],
-    [{ text: "◀️ Previous" }, { text: "▶️ Next" }],
-    [{ text: "👁 Show Answer" }, { text: "🙈 Hide Answer" }],
-    [{ text: "📝 Start Quiz" }, { text: "📂 Second menu" }]
+    [{ text: "🏠 Home" }, { text: "📂 Second menu" }],
+    [{ text: "🎓 Select Questions" }],
+    [{ text: "▶️ Next" }, { text: "◀️ Previous" }],
+    [{ text: "👁 Show Answer" }, { text: "🙈 Hide Answer" }]
   ],
   resize_keyboard: true,
   is_persistent: true,
@@ -37,31 +37,20 @@ const mainKeyboard = {
 const secondKeyboard = {
   keyboard: [
     [{ text: "💾 Backup" }, { text: "♻️ Restore" }],
+    [{ text: "📝 Start Quiz" }, { text: "⏹ Stop Quiz" }],
     [{ text: "📄 CSV Help" }, { text: "📥 CSV Template" }],
-    [{ text: "📝 Start Quiz" }, { text: "⬅️ Main menu" }]
+    [{ text: "⬅️ Main menu" }]
   ],
   resize_keyboard: true,
   is_persistent: true,
   input_field_placeholder: "Choose a question bank action…"
 };
 
-function getKeyboard(baseKeyboard, chatId) {
-  const isQuizActive = activeQuizRuns.has(String(chatId));
-  if (!isQuizActive || !baseKeyboard || !Array.isArray(baseKeyboard.keyboard)) return baseKeyboard;
-  const rows = baseKeyboard.keyboard.map(row =>
-    row.map(btn => (btn.text === "📝 Start Quiz" ? { text: "🛑 End Quiz" } : btn))
-  );
-  if (!rows.some(row => row.some(btn => btn.text === "🛑 End Quiz"))) {
-    rows.push([{ text: "🛑 End Quiz" }]);
-  }
-  return { ...baseKeyboard, keyboard: rows };
-}
-
 async function reply(chatId, text, keyboard = mainKeyboard) {
   return telegram("sendMessage", {
     chat_id: chatId, text, parse_mode: "HTML",
     disable_web_page_preview: true,
-    reply_markup: getKeyboard(keyboard, chatId)
+    reply_markup: keyboard
   });
 }
 
@@ -92,7 +81,6 @@ async function sendQuizQuestion(chatId, room, run) {
     text: String.fromCharCode(65 + index) + ". " + String(option).slice(0, 55),
     callback_data: "qz:" + quiz.id + ":" + index
   }]);
-  keyboard.push([{ text: "🛑 End Quiz", callback_data: "qz_end:" + quiz.id }]);
   run.deadline = Date.now() + (run.quizTimePerQuestion || QUIZ_QUESTION_SECONDS) * 1000;
   run.messageText = "📝 <b>SMART CLASSROOM LIVE QUIZ</b>\n\n" +
     "🎓 " + escapeHtml(q.cls) + " • " + escapeHtml(q.subject) + "\n" +
@@ -134,13 +122,11 @@ async function sendQuizQuestion(chatId, room, run) {
         " | सही: " + correctCount +
         " | गलत: " + (responses.length - correctCount) +
         "\n➡️ अगला सवाल 5 सेकंड में…";
-      const isLastQuestion = run.index + 1 >= run.questions.length;
       await telegram("editMessageText", {
         chat_id: chatId, message_id: sentMessage.message_id,
         text: revealText, parse_mode: "HTML",
-        reply_markup: { inline_keyboard: isLastQuestion ? [] : [[{ text: "🛑 End Quiz", callback_data: "qz_end:" + quiz.id }]] }
+        reply_markup: { inline_keyboard: [] }
       });
-   
       run.revealTimer = setTimeout(async () => {
         if (run.stopped || activeQuizRuns.get(String(chatId)) !== run) return;
         run.index += 1;
@@ -187,16 +173,17 @@ async function finishQuizRun(chatId, room, run, stopped = false) {
     ? "\n\n🏆 <b>Top Students</b>\n" + leaderboard.map((x,i) =>
         (i+1) + ". " + escapeHtml(x.name) + " — <b>" + x.correct + "/" + run.questions.length + "</b>"
       ).join("\n")
-     await telegram("sendMessage", {
+    : "\n\nअभी किसी विद्यार्थी ने उत्तर नहीं दिया।";
+  await telegram("sendMessage", {
     chat_id: chatId,
-    text: (stopped ? "🛑 <b>Quiz समाप्त कर दिया गया!</b>" : "🎉 <b>Quiz पूरा हुआ!</b>") +
+    text: (stopped ? "⏹ <b>Quiz रोक दिया गया!</b>" : "🎉 <b>Quiz पूरा हुआ!</b>") +
       "\n📚 कुल प्रश्न: <b>" + run.questions.length + "</b>" +
       "\n👥 कुल उत्तर: <b>" + totalAnswers + "</b>" +
       "\n✅ सही उत्तर: <b>" + correctAnswers + "</b>" +
       "\n❌ गलत उत्तर: <b>" + (totalAnswers-correctAnswers) + "</b>" + rankingText,
-    parse_mode: "HTML",
-    reply_markup: getKeyboard(mainKeyboard, chatId)
+    parse_mode: "HTML"
   });
+}
 function csvCell(value) {
   const text = String(value ?? "");
   return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
@@ -597,22 +584,7 @@ async function handleUpdate(update, io) {
       await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "Unauthorized", show_alert: true });
       return;
     }
-        if (String(callback.data || "").startsWith("qz_end:")) {
-      const run = activeQuizRuns.get(String(chatId));
-      const activeQuiz = await db.getActiveTelegramQuiz(chatId).catch(() => null);
-      if (!run && !activeQuiz) {
-        await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "यह Quiz पहले ही समाप्त हो चुका है।", show_alert: false });
-        return;
-      }
-      await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "🛑 Quiz समाप्त किया जा रहा है…" });
-      if (run) await finishQuizRun(chatId, DEFAULT_ROOM, run, true);
-      else {
-        await db.stopTelegramQuiz(`${DEFAULT_ROOM}_${chatId}`).catch(() => {});
-        await db.stopTelegramQuiz(DEFAULT_ROOM).catch(() => {});
-        await db.stopTelegramQuizSession(chatId).catch(() => {});
-      }
-      return;
-    i}f (callback.data === "ai_cancel") {
+    if (callback.data === "ai_cancel") {
       pendingAiGenerations.delete(String(chatId));
       await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "Cancelled" });
       await telegram("editMessageReplyMarkup", { chat_id: chatId, message_id: callback.message.message_id, reply_markup: { inline_keyboard: [] } });
@@ -721,9 +693,7 @@ async function handleUpdate(update, io) {
       "⬅️ Main menu": "/mainmenu",
       "📂 Second menu": "/secondmenu",
       "🎓 Select Questions": "/select",
-      "⬅️ Back": "/backselect",
-  "🛑 End Quiz": "/quizstop",
-  "👁 Toggle Answer": "/toggleanswer"
+      "⬅️ Back": "/backselect"
     };
     const normalizedText = buttonCommands[buttonText] || buttonText;
     const [commandToken, ...rest] = normalizedText.split(/\s+/);
@@ -825,7 +795,7 @@ async function handleUpdate(update, io) {
       await db.saveTelegramQuizSession({ chat_id: String(chatId), room: quizRoom, questions: candidates, current_index: 0, active: true, status: "asking" });
       await sendQuizQuestion(chatId, quizRoom, run);
       const pqSeconds = saved.quizTimePerQuestion || QUIZ_QUESTION_SECONDS;
-   await reply(chatId, "✅ Automatic Quiz शुरू हो गया। हर सवाल के लिए " + pqSeconds + " सेकंड हैं।\nआप किसी भी समय <b>🛑 End Quiz</b> बटन से क्विज़ समाप्त कर सकते हैं।", mainKeyboard);   await telegram("sendMessage", { chat_id: chatId, text: "✅ Automatic Quiz शुरू हो गया। हर सवाल के लिए " + pqSeconds + " सेकंड हैं।" });
+      await telegram("sendMessage", { chat_id: chatId, text: "✅ Automatic Quiz शुरू हो गया। हर सवाल के लिए " + pqSeconds + " सेकंड हैं।" });
       return;
     }
 
