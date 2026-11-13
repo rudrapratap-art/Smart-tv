@@ -65,6 +65,19 @@ const pendingAiGenerations = new Map();
 const activeQuizRuns = new Map();
 const QUIZ_QUESTION_SECONDS = 30;
 
+async function showQuizStopKeyboard(chatId) {
+  await telegram("sendMessage", {
+    chat_id: chatId,
+    text: "📝 Quiz controls",
+    reply_markup: {
+      keyboard: [[{ text: "🛑 Quiz Stop" }]],
+      resize_keyboard: true,
+      is_persistent: true,
+      input_field_placeholder: "Quiz चल रहा है…"
+    }
+  });
+}
+
 async function sendQuizQuestion(chatId, room, run) {
   if (run.stopped || activeQuizRuns.get(String(chatId)) !== run) return;
   const q = run.questions[run.index];
@@ -93,15 +106,7 @@ async function sendQuizQuestion(chatId, room, run) {
     "<b>" + escapeHtml(questionText) + "</b>";
   const sentMessage = await telegram("sendMessage", {
     chat_id: chatId, text: run.messageText, parse_mode: "HTML",
-    reply_markup: {
-      inline_keyboard: keyboard,
-      // While a group quiz is active, replace the large admin keyboard
-      // with one compact stop control so it does not cover the chat.
-      keyboard: [[{ text: "🛑 Quiz Stop" }]],
-      resize_keyboard: true,
-      is_persistent: true,
-      input_field_placeholder: "Quiz चल रहा है…"
-    }
+    reply_markup: { inline_keyboard: keyboard }
   });
   run.messageId = sentMessage.message_id;
   run.countdownTimer = setInterval(async () => {
@@ -820,6 +825,7 @@ async function handleUpdate(update, io) {
       const run = { room: quizRoom, questions: telegramQuestions, index: 0, quizIds: [], timer: null, countdownTimer: null, revealTimer: null, stopped: false, quizTimePerQuestion: saved.quizTimePerQuestion || QUIZ_QUESTION_SECONDS };
       activeQuizRuns.set(String(chatId), run);
       await db.saveTelegramQuizSession({ chat_id: String(chatId), room: quizRoom, questions: telegramQuestions, current_index: 0, active: true, status: "asking" });
+      await showQuizStopKeyboard(chatId);
       await sendQuizQuestion(chatId, quizRoom, run);
       const pqSeconds = saved.quizTimePerQuestion || QUIZ_QUESTION_SECONDS;
       await telegram("sendMessage", { chat_id: chatId, text: "✅ Automatic Quiz शुरू हो गया। हर सवाल के लिए " + pqSeconds + " सेकंड हैं।" });
@@ -1048,6 +1054,7 @@ async function recoverActiveQuizRuns() {
       const run = { room: session.room, questions, index, quizIds: [], timer: null, countdownTimer: null, revealTimer: null, stopped: false };
       activeQuizRuns.set(chatId, run);
       await telegram("sendMessage", { chat_id: chatId, text: "🔄 <b>Bot restart के बाद Quiz फिर से शुरू हुआ है।</b> वर्तमान प्रश्न का timer 30 सेकंड से शुरू होगा।", parse_mode: "HTML" });
+      await showQuizStopKeyboard(chatId);
       await sendQuizQuestion(chatId, session.room, run);
       console.log("Recovered Telegram quiz:", chatId, "question", index + 1);
     } catch (error) { console.error("Quiz recovery failed for", chatId, error.message); }
