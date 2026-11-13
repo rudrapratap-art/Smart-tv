@@ -92,7 +92,7 @@ io.on("connection", socket => {
       if (saved) {
         const filter = saved.filter || {};
         saved.questions = questions.filter(q =>
-          (!filter.cls || String(q.cls) === String(filter.cls)) &&
+          (!filter.cls || filter.cls === "all" || String(q.cls) === String(filter.cls)) &&
           (!filter.subject || String(q.subject) === String(filter.subject)) &&
           (!filter.chapter || String(q.chapter) === String(filter.chapter)) &&
           (!Array.isArray(filter.subjects) || !filter.subjects.length || filter.subjects.includes(String(q.subject))) &&
