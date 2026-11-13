@@ -368,10 +368,12 @@ async function commitCsvImport(chatId, incoming, io, room) {
 }
 
 function filterQuestionBank(questions, filter = {}) {
+  const subjects = Array.isArray(filter.subjects) ? filter.subjects : (filter.subject ? [filter.subject] : []);
+  const chapters = Array.isArray(filter.chapters) ? filter.chapters : (filter.chapter ? [filter.chapter] : []);
   return (questions || []).filter(q =>
     (!filter.cls || String(q.cls) === String(filter.cls)) &&
-    (!filter.subject || String(q.subject) === String(filter.subject)) &&
-    (!filter.chapter || String(q.chapter) === String(filter.chapter))
+    (!subjects.length || subjects.includes(String(q.subject))) &&
+    (!chapters.length || chapters.includes(String(q.chapter)))
   );
 }
 
