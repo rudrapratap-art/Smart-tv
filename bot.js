@@ -809,8 +809,7 @@ async function handleUpdate(update, io) {
       const saved = await getState(room, bank);
       const candidates = filterQuestionBank(bank, saved.filter || {});
       if (!candidates.length) throw new Error("पहले 🎓 Select Questions से Chapter चुनें या Question Bank में सवाल जोड़ें।");
-      // Keep Telegram quiz count separate from the TV quiz count, while supporting
-      // older saved states that only have quizQuestionCount.
+      // Question count belongs only to the Telegram group quiz.
       const telegramQuestionCount = Number(saved.telegramQuizQuestionCount || candidates.length);
       if (!Number.isInteger(telegramQuestionCount) || telegramQuestionCount < 1) {
         throw new Error("पहले /setquestions से Telegram quiz के सवालों की संख्या सेट करें।");
@@ -850,13 +849,13 @@ async function handleUpdate(update, io) {
 
     if (command === "/quizstop") {
       if (!["group", "supergroup"].includes(message.chat.type)) {
-        await reply(chatId, "Quiz बंद करने के लिए Class Group में /quizstop भेजें।", secondKeyboard);
+        await reply(chatId, "Quiz बंद करने के लिए Class Group में /quizstop भेजें।", mainKeyboard);
         return;
       }
       const run = activeQuizRuns.get(String(chatId));
       const activeQuiz = await db.getActiveTelegramQuiz(chatId);
       if (!run && !activeQuiz) {
-        await reply(chatId, "अभी कोई active Quiz नहीं है।", secondKeyboard);
+        await reply(chatId, "अभी कोई active Quiz नहीं है।", mainKeyboard);
         return;
       }
       if (run) {
@@ -866,6 +865,7 @@ async function handleUpdate(update, io) {
         // stop the exact group room returned by the active quiz record.
         await db.stopTelegramQuiz(activeQuiz.room || (room + "_" + chatId));
         await db.stopTelegramQuizSession(chatId).catch(error => console.error("Quiz session cleanup:", error.message));
+        await telegram("sendMessage", { chat_id: chatId, text: "⏹ <b>Quiz रोक दिया गया!</b>", parse_mode: "HTML", reply_markup: mainKeyboard });
       }
       return;
     }
@@ -1085,7 +1085,7 @@ async function configureWebhook() {
       { command: "backup", description: "Export question bank JSON and CSV" },
       { command: "generate", description: "Generate MCQs with OpenRouter AI AI" },
       { command: "quiz", description: "Start current question quiz in class group" },
-      { command: "quizstop", description: "Stop the active class quiz" },
+
       { command: "restore", description: "Restore questions from JSON backup" },
       { command: "edit", description: "Edit a question" },
       { command: "delete", description: "Delete a question" },
