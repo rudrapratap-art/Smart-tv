@@ -34,12 +34,34 @@ function getControllerQuestions(){
  return questions.filter(q=>(controllerFilter.cls==="all"||q.cls===controllerFilter.cls)&&(!controllerFilter.subjects.length||controllerFilter.subjects.includes(q.subject))&&(!controllerFilter.chapters.length||controllerFilter.chapters.includes(q.chapter)));
 }
 function current(){const list=getControllerQuestions();return list.length?list[Math.max(0,Math.min(index,list.length-1))]:null}
-function state(){const list=getControllerQuestions();return {questions:list,index,showAnswer,room,language:$("displayLanguage")?.value||"both",progress:$("showProgress")?.checked!==false};}
+function state(){
+ const list=getControllerQuestions();
+ return {
+  questions:list,index,showAnswer,room,
+  filter:{cls:controllerFilter.cls,subjects:[...controllerFilter.subjects],chapters:[...controllerFilter.chapters]},
+  language:$("displayLanguage")?.value||"both",
+  progress:$("showProgress")?.checked!==false
+ };
+}
 function broadcast(){if(socket)socket.emit("class-state",{room,state:state()});}
 if(socket){
  socket.on("connect",()=>{$("connectionStatus").textContent="Connected";socket.emit("join-room",room)});
  socket.on("joined",()=>{$("connectionStatus").textContent="Connected"});
- socket.on("class-state",s=>{if(!s)return;if(Array.isArray(s.questions)){questions=s.questions;localStorage.setItem("sc_questions",JSON.stringify(questions));remoteReady=true}$("totalCount").textContent=questions.length;index=Math.max(0,Math.min(Number(s.index)||0,Math.max(0,questions.length-1)));showAnswer=!!s.showAnswer;renderController();renderList()});
+ socket.on("class-state",s=>{
+  if(!s)return;
+  if(s.filter&&typeof s.filter==="object"){
+   controllerFilter={
+    cls:s.filter.cls||"all",
+    subjects:Array.isArray(s.filter.subjects)?s.filter.subjects:(s.filter.subject?[s.filter.subject]:[]),
+    chapters:Array.isArray(s.filter.chapters)?s.filter.chapters:(s.filter.chapter?[s.filter.chapter]:[])
+   };
+  }else{
+   controllerFilter={cls:"all",subjects:[],chapters:[]};
+  }
+  index=Math.max(0,Math.min(Number(s.index)||0,Math.max(0,getControllerQuestions().length-1)));
+  showAnswer=!!s.showAnswer;
+  renderController();
+ });
  socket.on("disconnect",()=>{$("connectionStatus").textContent="Offline"});
 }
 async function bootstrapRemote(){
