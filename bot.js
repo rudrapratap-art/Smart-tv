@@ -150,7 +150,9 @@ async function finishQuizRun(chatId, room, run, stopped = false) {
       reply_markup: { inline_keyboard: [] }
     }).catch(() => {});
   }
-  await db.stopTelegramQuiz(room);
+  // Telegram group quizzes run in a dedicated room (DEFAULT_ROOM_chatId).
+  // Always stop that run's room, not the TV classroom room passed by the caller.
+  await db.stopTelegramQuiz(run.room || room);
   await db.stopTelegramQuizSession(chatId).catch(error => console.error("Quiz session cleanup:", error.message));
   activeQuizRuns.delete(String(chatId));
   const totals = new Map();
@@ -787,12 +789,22 @@ async function handleUpdate(update, io) {
       const saved = await getState(room, bank);
       const candidates = filterQuestionBank(bank, saved.filter || {});
       if (!candidates.length) throw new Error("पहले 🎓 Select Questions से Chapter चुनें या Question Bank में सवाल जोड़ें।");
+      // Keep Telegram quiz count separate from the TV quiz count, while supporting
+      // older saved states that only have quizQuestionCount.
+      const telegramQuestionCount = Number(saved.telegramQuizQuestionCount || saved.quizQuestionCount || candidates.length);
+      if (!Number.isInteger(telegramQuestionCount) || telegramQuestionCount < 1) {
+        throw new Error("पहले /setquestions से Telegram quiz के सवालों की संख्या सेट करें।");
+      }
+      if (telegramQuestionCount > candidates.length) {
+        throw new Error("इस Class/Subject/Chapter में केवल " + candidates.length + " सवाल हैं। /setquestions की संख्या कम करें या दूसरा Chapter चुनें।");
+      }
+      const telegramQuestions = candidates.slice(0, telegramQuestionCount);
       const previousRun = activeQuizRuns.get(String(chatId));
       if (previousRun) await finishQuizRun(chatId, room, previousRun, true);
       const quizRoom = `${room}_${chatId}`;
-      const run = { room: quizRoom, questions: candidates, index: 0, quizIds: [], timer: null, countdownTimer: null, revealTimer: null, stopped: false, quizTimePerQuestion: saved.quizTimePerQuestion || QUIZ_QUESTION_SECONDS };
+      const run = { room: quizRoom, questions: telegramQuestions, index: 0, quizIds: [], timer: null, countdownTimer: null, revealTimer: null, stopped: false, quizTimePerQuestion: saved.quizTimePerQuestion || QUIZ_QUESTION_SECONDS };
       activeQuizRuns.set(String(chatId), run);
-      await db.saveTelegramQuizSession({ chat_id: String(chatId), room: quizRoom, questions: candidates, current_index: 0, active: true, status: "asking" });
+      await db.saveTelegramQuizSession({ chat_id: String(chatId), room: quizRoom, questions: telegramQuestions, current_index: 0, active: true, status: "asking" });
       await sendQuizQuestion(chatId, quizRoom, run);
       const pqSeconds = saved.quizTimePerQuestion || QUIZ_QUESTION_SECONDS;
       await telegram("sendMessage", { chat_id: chatId, text: "✅ Automatic Quiz शुरू हो गया। हर सवाल के लिए " + pqSeconds + " सेकंड हैं।" });
@@ -952,10 +964,13 @@ async function handleUpdate(update, io) {
       if (!Number.isFinite(count) || count < 1 || count > 500) throw new Error("Usage: /setquestions 1–500");
       if (!questions.length) throw new Error("Question Bank खाली है। पहले /add करें।");
       if (count > questions.length) throw new Error(`बैंक में केवल ${questions.length} सवाल उपलब्ध हैं।`);
-      state.quizQuestionCount = count;
+      // This command configures both quiz modes. Keep distinct fields so the
+      // Telegram group quiz and TV quiz can evolve independently afterwards.
+      state.quizQuestionCount = count; // TV quiz (/quizstart)
+      state.telegramQuizQuestionCount = count; // Telegram group quiz (/quiz)
       state.quizDuration = state.quizDuration || 0;
       await publish(io, room, state);
-      await reply(chatId, `📋 क्विज़ में सवालों की संख्या सेट हो गई: ${count}`);
+      await reply(chatId, `📋 सवालों की संख्या सेट हो गई: ${count}\n📺 TV Quiz: ${count} सवाल\n📲 Telegram Group Quiz: ${count} सवाल`);
       return;
     }
 
