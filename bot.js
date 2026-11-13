@@ -822,8 +822,14 @@ async function handleUpdate(update, io) {
         await reply(chatId, "अभी कोई active Quiz नहीं है।", secondKeyboard);
         return;
       }
-      if (run) await finishQuizRun(chatId, room, run, true);
-      else await db.stopTelegramQuiz(room);
+      if (run) {
+        await finishQuizRun(chatId, room, run, true);
+      } else {
+        // If the in-memory run was lost (for example after a process restart),
+        // stop the exact group room returned by the active quiz record.
+        await db.stopTelegramQuiz(activeQuiz.room || (room + "_" + chatId));
+        await db.stopTelegramQuizSession(chatId).catch(error => console.error("Quiz session cleanup:", error.message));
+      }
       return;
     }
 
