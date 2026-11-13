@@ -810,7 +810,7 @@ async function handleUpdate(update, io) {
       if (!candidates.length) throw new Error("पहले 🎓 Select Questions से Chapter चुनें या Question Bank में सवाल जोड़ें।");
       // Keep Telegram quiz count separate from the TV quiz count, while supporting
       // older saved states that only have quizQuestionCount.
-      const telegramQuestionCount = Number(saved.telegramQuizQuestionCount || saved.quizQuestionCount || candidates.length);
+      const telegramQuestionCount = Number(saved.telegramQuizQuestionCount || candidates.length);
       if (!Number.isInteger(telegramQuestionCount) || telegramQuestionCount < 1) {
         throw new Error("पहले /setquestions से Telegram quiz के सवालों की संख्या सेट करें।");
       }
@@ -821,7 +821,7 @@ async function handleUpdate(update, io) {
       const previousRun = activeQuizRuns.get(String(chatId));
       if (previousRun) await finishQuizRun(chatId, room, previousRun, true);
       const quizRoom = `${room}_${chatId}`;
-      const pqSeconds = Number(saved.telegramQuizTimePerQuestion || saved.quizTimePerQuestion || QUIZ_QUESTION_SECONDS);
+      const pqSeconds = Number(saved.telegramQuizTimePerQuestion || QUIZ_QUESTION_SECONDS);
       const durationMinutes = Number(saved.telegramQuizDurationMinutes || 0);
       const run = {
         room: quizRoom, questions: telegramQuestions, index: 0, quizIds: [],
