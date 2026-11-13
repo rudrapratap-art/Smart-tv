@@ -28,11 +28,20 @@ Set these in Render Dashboard → your Web Service → Environment:
 ## Telegram commands
 - `/start` or `/help` — help
 - `/status` — room and current question
+- `/select` — choose Class → Subject → Chapter and load only those questions on the TV
 - `/next`, `/prev` — navigate
 - `/answer`, `/hide` — reveal/hide answer
 - `/list` — list first 30 questions with IDs
+- `/csv` — show CSV import format and preview workflow
+- `/csvtemplate` — download a ready-to-edit sample CSV file
+- `/backup` — send the full question bank as JSON and CSV files
+- `/restore` — restore questions from a JSON backup after preview and confirmation
+- `/quiz` — start the currently selected question as a live quiz in the Telegram class group (admin only)
+- `/quizstop` — stop the active group quiz and show response totals
+- Send a `.csv` document to the bot to preview the first five questions, then Confirm or Cancel before importing. CSV headers: `cls,subject,chapter,hi,en,A,B,C,D,answer,explain`. Answer accepts A/B/C/D or 0/1/2/3. Hindi or English question text is required; explanation is optional. Maximum 1,000 questions and 5 MB per file. The import is not saved until Confirm is pressed (preview expires after 15 minutes). Existing questions are preserved and exact duplicate questions are skipped.
 - `/add Class 8 | Science | Chapter | Hindi question | English question | A | B | C | D | Answer(A-D) | Explanation`
 - `/edit QUESTION_ID | Class 8 | Science | Chapter | Hindi question | English question | A | B | C | D | Answer(A-D) | Explanation`
+- Send a `.json` backup created by `/backup` to preview and restore it. Restore appends missing questions, skips duplicates, and never deletes existing questions. Preview confirmation expires after 15 minutes.
 - `/delete QUESTION_ID`
 - `/setduration <minutes>` — set quiz duration (1–480 minutes)
 - `/setquestions <count>` — set number of questions in quiz (1–500)
@@ -53,3 +62,11 @@ Open `/tv.html` on the TV and the dashboard on the phone. Use the same room code
 
 ## Existing browser data
 The existing V3 question bank is stored in each browser's localStorage. This integration does not automatically upload those private browser records. Export them as CSV and import them into the database through the dashboard or use the bot's `/add` command after setup.
+
+
+### Telegram live quiz setup
+1. Add the bot to the class Telegram group and make it an administrator (allow it to send messages).
+2. An authorized teacher selects the class/subject/chapter in the bot, then sends `/quiz` in the class group.
+3. Students tap one of the four inline options. The first answer per Telegram account is recorded; repeat taps are rejected.
+4. The teacher sends `/quizstop` in the same group to close the quiz and see response totals and the correct option.
+5. Quiz sessions and responses are stored in Supabase. The correct answer is not shown to students when they submit.

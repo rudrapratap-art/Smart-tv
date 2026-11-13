@@ -19,16 +19,22 @@ function persist(){
  $("totalCount").textContent=questions.length;
  selectedQuestionIds=new Set([...selectedQuestionIds].filter(id=>questions.some(q=>String(q.id)===id)));
  renderList();renderController();broadcast();
+ if(typeof updateDashboardOverview==="function")updateDashboardOverview();
  const adminKey=localStorage.getItem("sc_admin_key")||"";
  if(remoteReady&&adminKey){
   fetch("/api/questions",{method:"PUT",headers:{"Content-Type":"application/json","X-Admin-Key":adminKey},body:JSON.stringify({questions})})
    .then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.json()})
-   .catch(err=>{console.warn("Cloud question save failed:",err);toast("Cloud save failed — Admin Key जाँचें")});
+   .then(data=>{if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync: Synced "+(data.count??questions.length)+" questions";})
+   .catch(err=>{console.warn("Cloud question save failed:",err);if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync failed: "+err.message;toast("Cloud save failed — Admin Key जाँचें")});
  }
 }
 function toast(t){let el=$("toast");el.textContent=t;el.classList.add("show");setTimeout(()=>el.classList.remove("show"),2200)}
-function current(){return questions.length?questions[Math.max(0,Math.min(index,questions.length-1))]:null}
-function state(){return {questions,index,showAnswer,room,language:$("displayLanguage")?.value||"both",progress:$("showProgress")?.checked!==false};}
+let controllerFilter={cls:"all",subjects:[],chapters:[]};
+function getControllerQuestions(){
+ return questions.filter(q=>(controllerFilter.cls==="all"||q.cls===controllerFilter.cls)&&(!controllerFilter.subjects.length||controllerFilter.subjects.includes(q.subject))&&(!controllerFilter.chapters.length||controllerFilter.chapters.includes(q.chapter)));
+}
+function current(){const list=getControllerQuestions();return list.length?list[Math.max(0,Math.min(index,list.length-1))]:null}
+function state(){const list=getControllerQuestions();return {questions:list,index,showAnswer,room,language:$("displayLanguage")?.value||"both",progress:$("showProgress")?.checked!==false};}
 function broadcast(){if(socket)socket.emit("class-state",{room,state:state()});}
 if(socket){
  socket.on("connect",()=>{$("connectionStatus").textContent="Connected";socket.emit("join-room",room)});
@@ -37,47 +43,100 @@ if(socket){
  socket.on("disconnect",()=>{$("connectionStatus").textContent="Offline"});
 }
 async function bootstrapRemote(){
+ if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync: Checking…";
  try{
   const response=await fetch("/api/questions",{cache:"no-store"});
   if(response.ok){
    const data=await response.json();
    if(Array.isArray(data.questions)&&data.questions.length){questions=data.questions;localStorage.setItem("sc_questions",JSON.stringify(questions))}
    remoteReady=true;
-  }
- }catch(error){console.warn("Cloud question load unavailable:",error)}
+   if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync: Connected • "+questions.length+" questions loaded";
+  }else if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync unavailable — using local data";
+ }catch(error){console.warn("Cloud question load unavailable:",error);if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync offline — using local data"}
  $("totalCount").textContent=questions.length;renderList();renderController();
  if(socket&&socket.connected)socket.emit("join-room",room);
 }
 function showPage(id){document.querySelectorAll(".page").forEach(p=>p.classList.toggle("active",p.id===id));document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active",b.dataset.page===id));if(id==="controller")renderController()}
 document.querySelectorAll("[data-page]").forEach(b=>b.addEventListener("click",()=>showPage(b.dataset.page)));
-function move(n){if(n>0&&$("questionOrder")?.value==="random"&&questions.length>1){let next=index;while(next===index)next=Math.floor(Math.random()*questions.length);index=next}else index=Math.max(0,Math.min(questions.length-1,index+n));showAnswer=false;renderController();broadcast();resetTimer()}
-function renderController(){let q=current();if(!q){$("controllerQuestion").textContent="Question Bank में कोई प्रश्न नहीं है।";$("currentNumber").textContent="0 / 0";$("revealBtn").textContent="Show Answer";$("roomCode").value=room;return}$("controllerQuestion").textContent=[q.hi,q.en].filter(Boolean).join(" / ");$("currentNumber").textContent=(index+1)+" / "+questions.length;$("revealBtn").textContent=showAnswer?"Answer Shown":"Show Answer";$("roomCode").value=room}
+if($("quickAi"))$("quickAi").onclick=()=>showPage("ai");
+function move(n){
+ const list=getControllerQuestions();
+ if(n>0&&$("questionOrder")?.value==="random"&&list.length>1){let next=index;while(next===index)next=Math.floor(Math.random()*list.length);index=next}
+ else index=Math.max(0,Math.min(list.length-1,index+n));
+ showAnswer=false;renderController();broadcast();resetTimer()
+}
+function fillSelect(select,values,placeholder,selected=[]){
+ if(!select)return;
+ const previous=selected.length?selected:Array.from(select.selectedOptions||[]).map(o=>o.value);
+ select.innerHTML=(select.multiple?"":'<option value="all">'+placeholder+'</option>')+values.map(v=>'<option value="'+esc(v)+'">'+esc(v)+'</option>').join("");
+ if(select.multiple){Array.from(select.options).forEach(o=>o.selected=previous.includes(o.value))}
+ else select.value=values.includes(previous[0])?previous[0]:"all";
+}
+function updateControllerOptions(){
+ const cls=$("controllerClass"),subs=$("controllerSubjects"),chaps=$("controllerChapters");
+ if(!cls||!subs||!chaps)return;
+ const oldClass=cls.value||controllerFilter.cls;
+ const classes=[...new Set(questions.map(q=>q.cls).filter(Boolean))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+ fillSelect(cls,classes,"All Classes",[oldClass]);
+ controllerFilter.cls=cls.value||"all";
+ const scoped=questions.filter(q=>controllerFilter.cls==="all"||q.cls===controllerFilter.cls);
+ const subjects=[...new Set(scoped.map(q=>q.subject).filter(Boolean))].sort();
+ fillSelect(subs,subjects,"",controllerFilter.subjects);
+ const activeSubjects=Array.from(subs.selectedOptions).map(o=>o.value);
+ const chapters=[...new Set(scoped.filter(q=>!activeSubjects.length||activeSubjects.includes(q.subject)).map(q=>q.chapter).filter(Boolean))].sort();
+ fillSelect(chaps,chapters,"",controllerFilter.chapters);
+ controllerFilter.subjects=activeSubjects;
+ controllerFilter.chapters=Array.from(chaps.selectedOptions).map(o=>o.value);
+}
+function renderController(){
+ updateControllerOptions();
+ const list=getControllerQuestions(),q=current();
+ if(!q){$("controllerQuestion").textContent="इस selection में कोई प्रश्न नहीं है। Class, Subject या Chapter बदलें।";$("currentNumber").textContent="0 / 0";$("revealBtn").textContent="Show Answer";$("roomCode").value=room;$("controllerFilterSummary").textContent="No matching questions";return}
+ index=Math.max(0,Math.min(index,list.length-1));
+ $("controllerQuestion").textContent=[q.hi,q.en].filter(Boolean).join(" / ");
+ $("currentNumber").textContent=(index+1)+" / "+list.length;
+ $("revealBtn").textContent=showAnswer?"Answer Shown":"Show Answer";
+ $("roomCode").value=room;
+ $("controllerFilterSummary").textContent=list.length+" questions selected • "+(controllerFilter.cls==="all"?"All classes":controllerFilter.cls)+" • "+(controllerFilter.subjects.length?controllerFilter.subjects.join(", "):"All subjects")+" • "+(controllerFilter.chapters.length?controllerFilter.chapters.join(", "):"All chapters");
+}
+$("controllerClass").onchange=()=>{controllerFilter.cls=$("controllerClass").value;controllerFilter.subjects=[];controllerFilter.chapters=[];updateControllerOptions();renderController()};
+$("controllerSubjects").onchange=()=>{controllerFilter.subjects=Array.from($("controllerSubjects").selectedOptions).map(o=>o.value);controllerFilter.chapters=[];updateControllerOptions();renderController()};
+$("controllerChapters").onchange=()=>{controllerFilter.chapters=Array.from($("controllerChapters").selectedOptions).map(o=>o.value);renderController()};
+$("applyControllerFilter").onclick=()=>{controllerFilter.cls=$("controllerClass").value;controllerFilter.subjects=Array.from($("controllerSubjects").selectedOptions).map(o=>o.value);controllerFilter.chapters=Array.from($("controllerChapters").selectedOptions).map(o=>o.value);index=0;showAnswer=false;renderController();broadcast();resetTimer();toast(getControllerQuestions().length+" questions loaded on TV")};
+$("resetControllerFilter").onclick=()=>{controllerFilter={cls:"all",subjects:[],chapters:[]};$("controllerClass").value="all";Array.from($("controllerSubjects").options).forEach(o=>o.selected=false);Array.from($("controllerChapters").options).forEach(o=>o.selected=false);index=0;showAnswer=false;renderController();broadcast();resetTimer()};
 $("prevBtn").onclick=()=>move(-1);$("nextBtn").onclick=()=>move(1);$("revealBtn").onclick=()=>{showAnswer=true;renderController();broadcast()};$("resetBtn").onclick=()=>{showAnswer=false;renderController();broadcast()};
 function updateFilterOptions(){
- const classSelect=$("classFilter"), subjectSelect=$("subjectFilter");
- if(!classSelect||!subjectSelect)return;
- const currentClass=classSelect.value||"all", currentSubject=subjectSelect.value||"all";
+ const classSelect=$("classFilter"),subjectSelect=$("subjectFilter"),chapterSelect=$("chapterFilter");
+ if(!classSelect||!subjectSelect||!chapterSelect)return;
+ const currentClass=classSelect.value||"all",currentSubject=subjectSelect.value||"all",currentChapter=chapterSelect.value||"all";
  const classes=[...new Set(questions.map(q=>String(q.cls||"").trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
- const subjects=[...new Set(questions.map(q=>String(q.subject||"").trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
- classSelect.innerHTML='<option value="all">All Classes</option>'+classes.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join("");
- subjectSelect.innerHTML='<option value="all">All Subjects</option>'+subjects.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join("");
+ const subjects=[...new Set(questions.filter(q=>currentClass==="all"||q.cls===currentClass).map(q=>String(q.subject||"").trim()).filter(Boolean))].sort();
+ const chapters=[...new Set(questions.filter(q=>(currentClass==="all"||q.cls===currentClass)&&(currentSubject==="all"||q.subject===currentSubject)).map(q=>String(q.chapter||"").trim()).filter(Boolean))].sort();
+ classSelect.innerHTML='<option value="all">All Classes</option>'+classes.map(v=>'<option value="'+esc(v)+'">'+esc(v)+'</option>').join("");
+ subjectSelect.innerHTML='<option value="all">All Subjects</option>'+subjects.map(v=>'<option value="'+esc(v)+'">'+esc(v)+'</option>').join("");
+ chapterSelect.innerHTML='<option value="all">All Chapters</option>'+chapters.map(v=>'<option value="'+esc(v)+'">'+esc(v)+'</option>').join("");
  classSelect.value=classes.includes(currentClass)?currentClass:"all";
  subjectSelect.value=subjects.includes(currentSubject)?currentSubject:"all";
+ chapterSelect.value=chapters.includes(currentChapter)?currentChapter:"all";
 }
 function getFilteredQuestions(){
  const c=$("classFilter")?.value||"all", s=$("subjectFilter")?.value||"all";
  const term=($("searchQuestion")?.value||"").trim().toLocaleLowerCase();
- const chapter=($("chapterFilter")?.value||"").trim().toLocaleLowerCase();
+ const chapter=$("chapterFilter")?.value||"all";
  return questions.filter(q=>{
   const haystack=[q.hi,q.en,q.chapter,q.subject,...(Array.isArray(q.opts)?q.opts:(Array.isArray(q.options)?q.options:[]))].join(" ").toLocaleLowerCase();
-  return (c==="all"||q.cls===c)&&(s==="all"||q.subject===s)&&(!term||haystack.includes(term))&&(!chapter||String(q.chapter||"").toLocaleLowerCase().includes(chapter));
+  return (c==="all"||q.cls===c)&&(s==="all"||q.subject===s)&&(!term||haystack.includes(term))&&(chapter==="all"||String(q.chapter||"")===chapter);
  });
 }
 function renderList(){
  updateFilterOptions();
- const filtered=getFilteredQuestions();
+ const filtered=getFilteredQuestions().slice();
+ const sort=$("questionSort")?.value||"recent";
+ const textCompare=(a,b)=>String(a||"").localeCompare(String(b||""),undefined,{numeric:true,sensitivity:"base"});
+ filtered.sort((a,b)=>sort==="oldest"?Number(a.id)-Number(b.id):sort==="class"?textCompare(a.cls,b.cls)||textCompare(a.subject,b.subject):sort==="subject"?textCompare(a.subject,b.subject)||textCompare(a.chapter,b.chapter):sort==="chapter"?textCompare(a.chapter,b.chapter)||textCompare(a.subject,b.subject):Number(b.id)-Number(a.id));
  const list=$("questionList");
  if(!list)return;
+ if($("questionResultCount"))$("questionResultCount").textContent="Showing "+filtered.length+" of "+questions.length+" questions";
  const selectedVisible=filtered.filter(q=>selectedQuestionIds.has(String(q.id))).length;
  const allVisibleSelected=filtered.length>0&&selectedVisible===filtered.length;
  const bulk=$("bulkActions");
@@ -98,10 +157,11 @@ function renderList(){
  list.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>editQuestion(b.dataset.edit));
 }
 function esc(s){return String(s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
-["classFilter","subjectFilter"].forEach(id=>$(id).addEventListener("change",renderList));
-["searchQuestion","chapterFilter"].forEach(id=>$(id).addEventListener("input",renderList));
+["classFilter","subjectFilter","questionSort"].forEach(id=>$(id)?.addEventListener("change",renderList));
+$("searchQuestion").addEventListener("input",renderList);
+$("chapterFilter").addEventListener("change",renderList);
 if($("clearFilters"))$("clearFilters").onclick=()=>{
- $("classFilter").value="all";$("subjectFilter").value="all";$("chapterFilter").value="";$("searchQuestion").value="";
+ $("classFilter").value="all";$("subjectFilter").value="all";$("chapterFilter").value="all";$("searchQuestion").value="";if($("questionSort"))$("questionSort").value="recent";
  selectedQuestionIds.clear();renderList();
 };
 if($("selectAllFiltered"))$("selectAllFiltered").onchange=e=>{getFilteredQuestions().forEach(q=>{const id=String(q.id);if(e.target.checked)selectedQuestionIds.add(id);else selectedQuestionIds.delete(id)});renderList()};
@@ -125,46 +185,85 @@ function editQuestion(id){
  $("editorTitle").textContent="Edit Question";$("editor").classList.remove("hidden");$("editor").scrollIntoView({behavior:"smooth"});
 }
 $("addQuestion").onclick=()=>{$("editor").classList.remove("hidden");clearForm()};$("closeEditor").onclick=()=>$("editor").classList.add("hidden");
-$("saveQuestion").onclick=()=>{let q={id:editing||Date.now(),cls:$("qClass").value,subject:$("qSubject").value,chapter:$("qChapter").value,hi:$("qHi").value,en:$("qEn").value,opts:["optA","optB","optC","optD"].map(id=>$(id).value),answer:+$("qAnswer").value,explain:$("qExplanation").value};if(!q.hi&&!q.en){toast("Question लिखें");return}if(editing)questions=questions.map(x=>x.id===editing?q:x);else questions.push(q);index=questions.length-1;persist();$("editor").classList.add("hidden");toast("Question saved")}
+$("saveQuestion").onclick=()=>{
+ const q={id:editing||Date.now(),cls:$("qClass").value.trim(),subject:$("qSubject").value.trim(),chapter:$("qChapter").value.trim(),hi:$("qHi").value.trim(),en:$("qEn").value.trim(),opts:["optA","optB","optC","optD"].map(id=>$(id).value.trim()),answer:+$("qAnswer").value,explain:$("qExplanation").value.trim()};
+ if(!q.hi&&!q.en){toast("Question लिखें");return}
+ if(!q.chapter){toast("Chapter का नाम भरें");$("qChapter").focus();return}
+ const missing=q.opts.findIndex(v=>!v);if(missing>=0){const field="opt"+String.fromCharCode(65+missing);toast("Option "+String.fromCharCode(65+missing)+" खाली है");$(field).focus();return}
+ const fingerprint=v=>[v.cls,v.subject,v.chapter,(v.hi||v.en).trim().toLocaleLowerCase()].join("|");
+ const duplicate=questions.find(v=>String(v.id)!==String(editing)&&fingerprint(v)===fingerprint(q));
+ if(duplicate){toast("यह question पहले से मौजूद है");return}
+ if(editing)questions=questions.map(x=>String(x.id)===String(editing)?q:x);else questions.push(q);
+ index=Math.max(0,getControllerQuestions().length-1);persist();$("editor").classList.add("hidden");toast(editing?"Question updated":"Question saved")
+}
 function openTv(){window.open("/tv.html","_blank","noopener")}
 $("startTv").onclick=openTv;$("quickTv").onclick=openTv;$("openController").onclick=()=>showPage("controller");$("quickController").onclick=()=>showPage("controller");
 $("joinRoom").onclick=()=>{room=$("roomCode").value.trim().toUpperCase()||"CLASS10";if(socket)socket.emit("join-room",room);$("roomStatus").textContent="Room: "+room;broadcast();toast("Room connected: "+room)};
 function resetTimer(){remaining=+$("duration").value;renderTimer()}
 function renderTimer(){$("timerDisplay").textContent="00:"+String(remaining).padStart(2,"0")}
 $("duration").onchange=resetTimer;
-$("timerStart").onclick=()=>{if(timer)return;timer=setInterval(()=>{remaining--;renderTimer();if(remaining<=0){if($("autoReveal").checked&&!showAnswer){showAnswer=true;broadcast();remaining=5}else{move(1);return}}},1000)};
+$("timerStart").onclick=()=>{if(timer)return;timer=setInterval(()=>{remaining--;renderTimer();if(remaining<=0){if(!showAnswer){showAnswer=true;renderController();broadcast();remaining=5;renderTimer()}else{move(1);return}}},1000)};
 $("timerPause").onclick=()=>{clearInterval(timer);timer=null};$("timerReset").onclick=()=>{clearInterval(timer);timer=null;resetTimer()};resetTimer();
+async function syncQuestionsNow(){
+ const key=localStorage.getItem("sc_admin_key")||"";
+ if(!key){toast("पहले Settings में Admin Key सेव करें");if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync: Admin Key required";return}
+ if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync: Uploading…";
+ try{
+  const response=await fetch("/api/questions",{method:"PUT",headers:{"Content-Type":"application/json","X-Admin-Key":key},body:JSON.stringify({questions})});
+  const data=await response.json();if(!response.ok)throw new Error(data.error||("HTTP "+response.status));
+  remoteReady=true;if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync: Synced "+(data.count??questions.length)+" questions";toast("Cloud sync complete");
+ }catch(error){if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync failed: "+error.message;toast("Cloud sync failed")}
+}
+if($("syncNow"))$("syncNow").onclick=syncQuestionsNow;
 $("saveSettings").onclick=()=>{
  localStorage.setItem("sc_language",$("displayLanguage").value);
  localStorage.setItem("sc_order",$("questionOrder").value);
+ const dark=!!$("darkMode")?.checked;document.body.classList.toggle("dark-mode",dark);localStorage.setItem("sc_dark_mode",dark?"1":"0");
  const adminKey=$("adminApiKey")?.value.trim()||"";
  if(adminKey)localStorage.setItem("sc_admin_key",adminKey);else localStorage.removeItem("sc_admin_key");
  broadcast();toast("Settings saved");
 };
-$("displayLanguage").value=localStorage.getItem("sc_language")||"both";$("questionOrder").value=localStorage.getItem("sc_order")||"normal";if($("adminApiKey"))$("adminApiKey").value=localStorage.getItem("sc_admin_key")||"";
+$("displayLanguage").value=localStorage.getItem("sc_language")||"both";$("questionOrder").value=localStorage.getItem("sc_order")||"normal";if($("adminApiKey"))$("adminApiKey").value=localStorage.getItem("sc_admin_key")||"";const darkModeEnabled=localStorage.getItem("sc_dark_mode")==="1";document.body.classList.toggle("dark-mode",darkModeEnabled);if($("darkMode"))$("darkMode").checked=darkModeEnabled;
 window.addEventListener("keydown",e=>{if(document.activeElement.matches("input,textarea,select"))return;if(e.key==="ArrowRight")move(1);if(e.key==="ArrowLeft")move(-1);if(e.key==="Enter"||e.key===" ") {showAnswer=!showAnswer;broadcast();}});
 renderList();renderController();bootstrapRemote();
 // Upgrade v2: CSV import/export and student performance
 let scores=loadJson("sc_scores",[]);
+function updateDashboardOverview(){
+ const classes=new Set(questions.map(q=>String(q.cls||"").trim()).filter(Boolean));
+ const correct=scores.filter(x=>x.correct).length;
+ if($("dashboardClassCount"))$("dashboardClassCount").textContent=classes.size;
+ if($("dashboardAttempts"))$("dashboardAttempts").textContent=scores.length;
+ if($("dashboardAccuracy"))$("dashboardAccuracy").textContent=(scores.length?Math.round(correct/scores.length*100):0)+"%";
+ if($("dashboardRecent")){
+  const recent=[...scores].sort((a,b)=>String(b.time||"").localeCompare(String(a.time||""))).slice(0,5);
+  $("dashboardRecent").innerHTML=recent.length?recent.map(x=>"<div class=\"recent-row\"><span><b>"+esc(x.name||"Student")+"</b><small>"+esc(x.question||"Question attempt")+"</small></span><strong class=\""+(x.correct?"is-correct":"is-wrong")+"\">"+(x.correct?"Correct":"Incorrect")+"</strong></div>").join(""):"<p class=\"muted\">अभी कोई activity नहीं है। Controller में score दर्ज करें।</p>";
+ }
+}
 function saveScores(){localStorage.setItem("sc_scores",JSON.stringify(scores));renderScores()}
 function renderScores(){
- const correct=scores.filter(x=>x.correct).length, wrong=scores.length-correct;
- if($("attemptCount"))$("attemptCount").textContent=scores.length;
+ const period=$("scorePeriod")?.value||"all";const cutoff=period==="all"?0:Date.now()-Number(period)*86400000;const visible=scores.filter(x=>!cutoff||!Number.isFinite(Date.parse(x.time||""))||Date.parse(x.time)>=cutoff);
+ const correct=visible.filter(x=>x.correct).length, wrong=visible.length-correct;
+ if($("attemptCount"))$("attemptCount").textContent=visible.length;
  if($("correctCount"))$("correctCount").textContent=correct;
  if($("wrongCount"))$("wrongCount").textContent=wrong;
- if($("accuracyCount"))$("accuracyCount").textContent=(scores.length?Math.round(correct/scores.length*100):0)+"%";
- const grouped={};scores.forEach(x=>{let k=x.name||"Unnamed";grouped[k]??={correct:0,wrong:0};grouped[k][x.correct?"correct":"wrong"]++});
+ if($("accuracyCount"))$("accuracyCount").textContent=(visible.length?Math.round(correct/visible.length*100):0)+"%";
+ const grouped={};visible.forEach(x=>{let k=x.name||"Unnamed";grouped[k]??={correct:0,wrong:0};grouped[k][x.correct?"correct":"wrong"]++});
  if($("scoreboard"))$("scoreboard").innerHTML=Object.keys(grouped).length?`<table><thead><tr><th>Student</th><th>Correct</th><th>Incorrect</th><th>Score</th></tr></thead><tbody>${Object.entries(grouped).map(([n,v])=>`<tr><td>${esc(n)}</td><td>${v.correct}</td><td>${v.wrong}</td><td><b>${v.correct}</b></td></tr>`).join("")}</tbody></table>`:"<p class='muted'>अभी कोई score दर्ज नहीं है। Controller में बच्चे का नाम लिखकर Correct या Incorrect दबाएँ।</p>";
+ const bySubject={};visible.forEach(x=>{const key=x.subject||"Uncategorized";bySubject[key]??={correct:0,total:0};bySubject[key].total++;if(x.correct)bySubject[key].correct++});
+ if($("subjectPerformance"))$("subjectPerformance").innerHTML=Object.entries(bySubject).map(([name,v])=>"<p>"+esc(name)+" — <b>"+Math.round(v.correct/v.total*100)+"%</b> <small>("+v.correct+"/"+v.total+")</small></p>").join("")||"<p class=\"muted\">No subject data yet.</p>";
+ updateDashboardOverview();
 }
 function recordScore(correct){
  const name=$("studentName")?.value.trim();
  if(!name){toast("पहले बच्चे का नाम लिखें");return}
  const q=current();scores.push({name,correct,question:q?.hi||"",class:q?.cls||"",subject:q?.subject||"",time:new Date().toISOString()});
- saveScores();toast(correct?"Correct answer दर्ज हुआ (+1)":"Incorrect answer दर्ज हुआ");
+ saveScores();updateDashboardOverview();toast(correct?"Correct answer दर्ज हुआ (+1)":"Incorrect answer दर्ज हुआ");
 }
 if($("markCorrect"))$("markCorrect").onclick=()=>recordScore(true);
 if($("markWrong"))$("markWrong").onclick=()=>recordScore(false);
 if($("clearScores"))$("clearScores").onclick=()=>{if(confirm("सभी score records हटाएँ?")){scores=[];saveScores();toast("Score records cleared")}};
+if($("scorePeriod"))$("scorePeriod").onchange=renderScores;
+if($("exportScores"))$("exportScores").onclick=()=>{const period=$("scorePeriod")?.value||"all";const cutoff=period==="all"?0:Date.now()-Number(period)*86400000;const report=scores.filter(x=>!cutoff||!Number.isFinite(Date.parse(x.time||""))||Date.parse(x.time)>=cutoff);const rows=[["Student","Correct","Question","Class","Subject","Time"],...report.map(x=>[x.name,x.correct?"Yes":"No",x.question,x.class,x.subject,x.time])];const csv=rows.map(r=>r.map(csvCell).join(",")).join("\r\n");const url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));const link=document.createElement("a");link.href=url;link.download="smart-classroom-performance.csv";link.click();URL.revokeObjectURL(url)};
 function csvCell(v){return '"'+String(v??"").replace(/"/g,'""')+'"'}
 if($("exportCsv"))$("exportCsv").onclick=()=>{
  const header=["class","subject","chapter","hi","en","A","B","C","D","answer","explain"];
@@ -218,3 +317,34 @@ if($("importCsv"))$("importCsv").onchange=async e=>{
  }catch(err){toast("Import failed: "+err.message);console.error(err)}finally{e.target.value=""}
 };
 renderScores();
+updateDashboardOverview();
+
+/* OpenRouter AI question generator */
+let aiGeneratedQuestions = [];
+if ($("aiGenerate")) $("aiGenerate").onclick = async () => {
+ const status=$("aiStatus"), preview=$("aiPreview"), button=$("aiGenerate");
+ const adminKey=localStorage.getItem("sc_admin_key")||"";
+ if(!adminKey){toast("पहले Settings में Cloud Admin API Key सेव करें");showPage("settings");return}
+ const payload={cls:$("aiClass").value,subject:$("aiSubject").value.trim(),chapter:$("aiChapter").value.trim(),count:+$("aiCount").value,difficulty:$("aiDifficulty").value,language:$("aiLanguage").value};
+ if(!payload.subject||!payload.chapter){toast("Subject और Chapter भरें");return}
+ button.disabled=true;button.textContent="Generating...";status.textContent="OpenRouter AI सवाल तैयार कर रहा है...";preview.innerHTML="";$("aiSave").classList.add("hidden");
+ try{
+  const response=await fetch("/api/ai/generate",{method:"POST",headers:{"Content-Type":"application/json","X-Admin-Key":adminKey},body:JSON.stringify(payload)});
+  const data=await response.json();if(!response.ok)throw new Error(data.error||"Generation failed");
+  aiGeneratedQuestions=data.questions||[];
+  preview.innerHTML=aiGeneratedQuestions.map((q,i)=>"<article class='q-row'><div><b>"+(i+1)+". "+esc(q.hi||q.en)+"</b><small>"+esc(q.en||"")+"</small><small>"+q.opts.map((o,j)=>String.fromCharCode(65+j)+". "+esc(o)).join(" · ")+"</small><small>Correct: "+String.fromCharCode(65+q.answer)+" — "+esc(q.explain)+"</small></div></article>").join("");
+  status.textContent=aiGeneratedQuestions.length+" सवाल तैयार हैं। Save करने से पहले Preview जाँच लें।";
+  $("aiSave").classList.remove("hidden");
+ }catch(error){status.textContent=error.message;toast("AI Generator: "+error.message)}
+ finally{button.disabled=false;button.textContent="✨ Generate Questions"}
+};
+if ($("aiSave")) $("aiSave").onclick = async () => {
+ if(!aiGeneratedQuestions.length)return;
+ const existing=new Set(questions.map(q=>[q.cls,q.subject,q.chapter,(q.hi||q.en).trim().toLowerCase()].join("|")));
+ const additions=aiGeneratedQuestions.filter(q=>{const key=[q.cls,q.subject,q.chapter,(q.hi||q.en).trim().toLowerCase()].join("|");if(existing.has(key))return false;existing.add(key);return true});
+ if(!additions.length){toast("ये सभी सवाल पहले से मौजूद हैं");return}
+ questions.push(...additions);index=questions.length-1;persist();
+ $("aiStatus").textContent=additions.length+" नए सवाल Question Bank में जोड़ दिए गए।";
+ $("aiPreview").innerHTML="";$("aiSave").classList.add("hidden");aiGeneratedQuestions=[];
+ toast(additions.length+" AI questions added");
+};
