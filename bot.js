@@ -793,17 +793,16 @@ async function handleUpdate(update, io) {
       const pqSeconds = saved.quizTimePerQuestion || QUIZ_QUESTION_SECONDS;
       const quizCount = candidates.length;
       const totalMinutes = Math.floor(pqSeconds * quizCount / 60);
-      await reply(chatId,
-        `📝 <b>Quiz शुरू करने के लिए पुष्टि करें</b>\n\n` +
-        `🕐 प्रति सवाल: ${pqSeconds} सेकंड\n` +
-        `📊 कुल सवाल: ${quizCount}\n` +
-        `⏱ कुल समय: ${pqSeconds * quizCount} सेकंड (~${totalMinutes} मिनट)\n` +
-        `📁 रूम: ${room}\n`,
-        [[
-          { text: "▶️ ✅ Start Quiz", callback_data: "qz_start_confirm" },
-          { text: "❌ Cancel", callback_data: "qz_start_cancel" }
-        ]]
-      );
+      await telegram("sendMessage", {
+        chat_id: chatId,
+        text: `📝 <b>Quiz शुरू करने के लिए पुष्टि करें</b>\n\n` +
+          `🕐 प्रति सवाल: ${pqSeconds} सेकंड\n` +
+          `📊 कुल सवाल: ${quizCount}\n` +
+          `⏱ कुल समय: ${pqSeconds * quizCount} सेकंड (~${totalMinutes} मिनट)\n` +
+          `📁 रूम: ${room}\n`,
+        parse_mode: "HTML",
+        reply_markup: { inline_keyboard: [[{ text: "▶️ ✅ Start Quiz", callback_data: "qz_start_confirm" }, { text: "❌ Cancel", callback_data: "qz_start_cancel" }]] }
+      });
       return;
     }
     if (command === "/qz_start_confirm") {
