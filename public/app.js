@@ -49,6 +49,14 @@ if(socket){
  socket.on("joined",()=>{$("connectionStatus").textContent="Connected"});
  socket.on("class-state",s=>{
   if(!s)return;
+  if(Array.isArray(s.questions)){
+   const merged=new Map(questions.map(q=>[String(q.id),q]));
+   s.questions.forEach(q=>merged.set(String(q.id),q));
+   questions=[...merged.values()];
+   localStorage.setItem("sc_questions",JSON.stringify(questions));
+   remoteReady=true;
+   $("totalCount").textContent=questions.length;
+  }
   if(s.filter&&typeof s.filter==="object"){
    controllerFilter={
     cls:s.filter.cls||"all",
