@@ -779,7 +779,7 @@ async function handleUpdate(update, io) {
 
     if (command === "/quiz") {
       if (!["group", "supergroup"].includes(message.chat.type)) {
-        await reply(chatId, "📝 Quiz शुरू करने के लिए Bot को अपनी Class Telegram Group में Admin बनाकर उस Group में /quiz भेजें।");
+        await reply(chatId, "📝 Quiz शुरू करने के लिए Bot को अपनी Class Telegram Group में Admin बनाकर उस Group में /quiz भेजें।", secondKeyboard);
         return;
       }
       if (!db.isConfigured()) throw new Error("Quiz के लिए Supabase configuration जरूरी है।");
@@ -790,15 +790,56 @@ async function handleUpdate(update, io) {
       const previousRun = activeQuizRuns.get(String(chatId));
       if (previousRun) await finishQuizRun(chatId, room, previousRun, true);
       const quizRoom = `${room}_${chatId}`;
+      const pqSeconds = saved.quizTimePerQuestion || QUIZ_QUESTION_SECONDS;
+      const quizCount = candidates.length;
+      const totalMinutes = Math.floor(pqSeconds * quizCount / 60);
+      await reply(chatId,
+        `📝 <b>Quiz शुरू करने के लिए पुष्टि करें</b>\n\n` +
+        `🕐 प्रति सवाल: ${pqSeconds} सेकंड\n` +
+        `📊 कुल सवाल: ${quizCount}\n` +
+        `⏱ कुल समय: ${pqSeconds * quizCount} सेकंड (~${totalMinutes} मिनट)\n` +
+        `📁 रूम: ${room}\n`,
+        [[
+          { text: "▶️ ✅ Start Quiz", callback_data: "qz_start_confirm" },
+          { text: "❌ Cancel", callback_data: "qz_start_cancel" }
+        ]]
+      );
+      return;
+    }
+    if (command === "/qz_start_confirm") {
+      const callback = update?.callback_query;
+      if (!callback) {
+        await reply(chatId, "इस कमांड का सही तरीके से उपयोग नहीं किया गया। /quiz से फिर से शुरू करें।", secondKeyboard);
+        return;
+      }
+      const data = callback.data || "";
+      if (data === "qz_start_cancel" || data === "qz_start_cancel") {
+        await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "❌ Quiz शुरू करना रद्द कर दिया गया।" });
+        return;
+      }
+      const bank = await db.getQuestions();
+      const saved = await getState(room, bank);
+      const candidates = filterQuestionBank(bank, saved.filter || {});
+      if (!candidates.length) throw new Error("पहले 🎓 Select Questions से Chapter चुनें या Question Bank में सवाल जोड़ें।");
+      const previousRun = activeQuizRuns.get(String(chatId));
+      if (previousRun) await finishQuizRun(chatId, room, previousRun, true);
+      const quizRoom = `${room}_${chatId}`;
       const run = { room: quizRoom, questions: candidates, index: 0, quizIds: [], timer: null, countdownTimer: null, revealTimer: null, stopped: false, quizTimePerQuestion: saved.quizTimePerQuestion || QUIZ_QUESTION_SECONDS };
       activeQuizRuns.set(String(chatId), run);
       await db.saveTelegramQuizSession({ chat_id: String(chatId), room: quizRoom, questions: candidates, current_index: 0, active: true, status: "asking" });
-      await sendQuizQuestion(chatId, quizRoom, run);
+      await telegram("sendMessage", { chat_id: String(chatId), text: "🚀 Quiz शुरू हो गया! 🎉", parse_mode: "HTML", reply_markup: { inline_keyboard: [[{ text: "⏹ Stop Quiz", callback_data: "qz_stop_confirm" }]] } });
       const pqSeconds = saved.quizTimePerQuestion || QUIZ_QUESTION_SECONDS;
-      await telegram("sendMessage", { chat_id: chatId, text: "✅ Automatic Quiz शुरू हो गया। हर सवाल के लिए " + pqSeconds + " सेकंड हैं।" });
+      await sendQuizQuestion(chatId, quizRoom, run);
+      await reply(chatId, `✅ Quiz शुरू हो गया। प्रति सवाल ${pqSeconds} सेकंड।`, secondKeyboard);
       return;
     }
-
+    if (command === "/qz_start_cancel") {
+      const callback = update?.callback_query;
+      if (callback) {
+        await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "❌ Quiz शुरू करना रद्द कर दिया गया।" });
+      }
+      return;
+    }
     if (command === "/quizstop") {
       if (!["group", "supergroup"].includes(message.chat.type)) {
         await reply(chatId, "Quiz बंद करने के लिए Class Group में /quizstop भेजें।", secondKeyboard);
