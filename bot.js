@@ -626,12 +626,28 @@ async function handleUpdate(update, io) {
       try {
         const existing = await db.getQuestions();
         const seen = new Set(existing.map(questionFingerprint));
+        const canonicalValue = (value, candidates) => {
+          const raw = String(value || "").trim();
+          return candidates.find(item => String(item || "").trim().toLowerCase() === raw.toLowerCase()) || raw;
+        };
+        const rawClass = String(pendingAi.cls || pendingAi.questions[0]?.cls || "").trim();
+        const classNumber = rawClass.match(/^(?:class\\s*)?(\\d{1,2})(?:st|nd|rd|th)?$/i);
+        const classValue = canonicalValue(
+          classNumber
+            ? (existing.map(q => q.cls).find(value => new RegExp("^class\\s*" + Number(classNumber[1]) + "$", "i").test(String(value || "")) ) || ("Class " + Number(classNumber[1])))
+            : rawClass,
+          existing.map(q => q.cls)
+        );
+        const rawSubject = String(pendingAi.subject || pendingAi.questions[0]?.subject || "").trim();
+        const subjectValue = canonicalValue(rawSubject, existing.filter(q => String(q.cls) === classValue).map(q => q.subject));
+        const rawChapter = String(pendingAi.chapter || pendingAi.questions[0]?.chapter || "").trim();
+        const chapterValue = canonicalValue(rawChapter, existing.filter(q => String(q.cls) === classValue && String(q.subject) === subjectValue).map(q => q.chapter));
         const normalized = pendingAi.questions.map((q, i) => ({
           ...q,
           id: String(q.id || ("tg_ai_" + Date.now() + "_" + i + "_" + Math.floor(Math.random() * 1000000))),
-          cls: String(q.cls || pendingAi.cls || "").trim(),
-          subject: String(q.subject || pendingAi.subject || "").trim(),
-          chapter: String(q.chapter || pendingAi.chapter || "").trim(),
+          cls: classValue,
+          subject: subjectValue,
+          chapter: chapterValue,
           hi: String(q.hi || "").trim(),
           en: String(q.en || "").trim(),
           opts: Array.isArray(q.opts) ? q.opts.map(value => String(value || "").trim()) : [],
