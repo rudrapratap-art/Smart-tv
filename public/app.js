@@ -56,6 +56,8 @@ if(socket){
    localStorage.setItem("sc_questions",JSON.stringify(questions));
    remoteReady=true;
    $("totalCount").textContent=questions.length;
+   renderList();
+   if(typeof updateDashboardOverview==="function")updateDashboardOverview();
   }
   if(s.filter&&typeof s.filter==="object"){
    controllerFilter={
