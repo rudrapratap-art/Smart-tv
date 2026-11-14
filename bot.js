@@ -631,7 +631,7 @@ async function handleUpdate(update, io) {
           return candidates.find(item => String(item || "").trim().toLowerCase() === raw.toLowerCase()) || raw;
         };
         const rawClass = String(pendingAi.cls || pendingAi.questions[0]?.cls || "").trim();
-        const classNumber = rawClass.match(/^(?:class\\s*)?(\\d{1,2})(?:st|nd|rd|th)?$/i);
+        const classNumber = rawClass.match(/^(?:class\s*)?(\d{1,2})(?:st|nd|rd|th)?$/i);
         const classValue = canonicalValue(
           classNumber
             ? (existing.map(q => q.cls).find(value => new RegExp("^class\\s*" + Number(classNumber[1]) + "$", "i").test(String(value || "")) ) || ("Class " + Number(classNumber[1])))
