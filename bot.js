@@ -626,14 +626,40 @@ async function handleUpdate(update, io) {
       try {
         const existing = await db.getQuestions();
         const seen = new Set(existing.map(questionFingerprint));
-        const additions = pendingAi.questions.filter(q => { const key = questionFingerprint(q); if (seen.has(key)) return false; seen.add(key); return true; });
+        const normalized = pendingAi.questions.map((q, i) => ({
+          ...q,
+          id: String(q.id || ("tg_ai_" + Date.now() + "_" + i + "_" + Math.floor(Math.random() * 1000000))),
+          cls: String(q.cls || pendingAi.cls || "").trim(),
+          subject: String(q.subject || pendingAi.subject || "").trim(),
+          chapter: String(q.chapter || pendingAi.chapter || "").trim(),
+          hi: String(q.hi || "").trim(),
+          en: String(q.en || "").trim(),
+          opts: Array.isArray(q.opts) ? q.opts.map(value => String(value || "").trim()) : [],
+          answer: Number(q.answer),
+          explain: String(q.explain || "")
+        }));
+        const additions = normalized.filter(q => {
+          if (!q.cls || !q.subject || !q.chapter || (!q.hi && !q.en) || q.opts.length !== 4 ||
+              q.opts.some(value => !value) || !Number.isInteger(q.answer) || q.answer < 0 || q.answer > 3) {
+            throw new Error("Generated question का Class/Subject/Chapter या MCQ data अधूरा है।");
+          }
+          const key = questionFingerprint(q);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
         if (!additions.length) { await reply(chatId, "ℹ️ सभी generated questions पहले से मौजूद हैं। कोई बदलाव नहीं हुआ।"); return; }
-        const combined = [...existing, ...additions];
-        await db.saveQuestions(combined);
-        const state = await getState(DEFAULT_ROOM, combined);
-        state.questions = combined;
+        await db.appendQuestions(additions);
+        const savedBank = await db.getQuestions();
+        const savedIds = new Set(savedBank.map(q => String(q.id)));
+        const verifiedCount = additions.filter(q => savedIds.has(String(q.id))).length;
+        if (verifiedCount !== additions.length) {
+          throw new Error("केवल " + verifiedCount + "/" + additions.length + " questions Supabase में verify हुए।");
+        }
+        const state = await getState(DEFAULT_ROOM, savedBank);
+        state.questions = savedBank;
         await publish(io, DEFAULT_ROOM, state);
-        await reply(chatId, "✅ OpenRouter AI के " + additions.length + " नए questions Question Bank में save हो गए।\nDuplicates skipped: " + (pendingAi.questions.length - additions.length));
+        await reply(chatId, "✅ OpenRouter AI के " + verifiedCount + " नए questions Supabase Question Bank में save और verify हो गए।\nDuplicates skipped: " + (pendingAi.questions.length - additions.length) + "\nTotal Question Bank: " + savedBank.length);
       } catch (error) { console.error("AI question save:", error.message); await reply(chatId, "⚠️ Save failed: " + escapeHtml(error.message)); }
       return;
     }
@@ -793,7 +819,7 @@ async function handleUpdate(update, io) {
       const language = ["hi","en","both"].includes((parts[5] || "both").toLowerCase()) ? (parts[5] || "both").toLowerCase() : "both";
       await reply(chatId, "⏳ OpenRouter AI " + count + " questions generate कर रहा है...");
       const generated = await gemini.generateQuestions({ cls: parts[0], subject: parts[1], chapter: parts[2], count, difficulty, language });
-      pendingAiGenerations.set(String(chatId), { questions: generated, createdAt: Date.now() });
+      pendingAiGenerations.set(String(chatId), { questions: generated, cls: parts[0].trim(), subject: parts[1].trim(), chapter: parts[2].trim(), createdAt: Date.now() });
       const preview = generated.slice(0, 5).map((q,i) => (i+1) + ". <b>" + escapeHtml(q.hi || q.en) + "</b>\n" + q.opts.map((o,j) => String.fromCharCode(65+j) + ". " + escapeHtml(o)).join("\n") + "\nAnswer: <b>" + ["A","B","C","D"][q.answer] + "</b>").join("\n\n");
       await telegram("sendMessage", { chat_id: chatId, text: "✨ <b>OpenRouter AI Preview</b>\n\n📚 Generated: <b>" + generated.length + "</b>\n\n" + preview + (generated.length > 5 ? "\n\n…और " + (generated.length-5) + " questions" : "") + "\n\nConfirm करने पर Supabase Question Bank में save होंगे।", parse_mode: "HTML", reply_markup: { inline_keyboard: [[{text:"✅ Confirm & Save",callback_data:"ai_confirm"},{text:"❌ Cancel",callback_data:"ai_cancel"}]] } });
       return;
