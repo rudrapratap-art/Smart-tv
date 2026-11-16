@@ -144,7 +144,7 @@ test("pagination does not stop early when Content-Range total is unknown", async
   try {
     const questions = await db.getQuestions();
     assert.equal(questions.length, 23);
-    assert.equal(ranges.length, 5);
+    assert.equal(ranges.length, 6);
   } finally {
     global.fetch = originalFetch;
   }
