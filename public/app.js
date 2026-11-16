@@ -371,6 +371,7 @@ if($("importCsv"))$("importCsv").onchange=async e=>{
   const imported=rows.map((r,i)=>{
    const rawAnswer=get(r,"answer");let answer=Number(rawAnswer);
    const answerText=String(rawAnswer).trim().toUpperCase();
+   if(!answerText)throw new Error(`Row ${i+2}: answer खाली है; A/B/C/D या 0–3 भरें`);
    if(["A","B","C","D"].includes(answerText))answer=["A","B","C","D"].indexOf(answerText);
    else if(!Number.isFinite(answer)||!Number.isInteger(answer)||answer<0||answer>3)
     throw new Error(`Row ${i+2}: answer 0–3 या A/B/C/D होना चाहिए`);
