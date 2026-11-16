@@ -69,7 +69,6 @@ function render() {
 }
 
 function sendState() {
-  if (socket?.connected) socket.emit("class-state", { room, state });
   render();
 }
 
