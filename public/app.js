@@ -165,7 +165,8 @@ function renderList(){
  const filtered=getFilteredQuestions().slice();
  const sort=$("questionSort")?.value||"recent";
  const textCompare=(a,b)=>String(a||"").localeCompare(String(b||""),undefined,{numeric:true,sensitivity:"base"});
- filtered.sort((a,b)=>sort==="oldest"?Number(a.id)-Number(b.id):sort==="class"?textCompare(a.cls,b.cls)||textCompare(a.subject,b.subject):sort==="subject"?textCompare(a.subject,b.subject)||textCompare(a.chapter,b.chapter):sort==="chapter"?textCompare(a.chapter,b.chapter)||textCompare(a.subject,b.subject):Number(b.id)-Number(a.id));
+ const createdAt=q=>{const time=Date.parse(q.created_at||"");return Number.isFinite(time)?time:(/^\\d+$/.test(String(q.id))?Number(q.id):0)};
+ filtered.sort((a,b)=>sort==="oldest"?createdAt(a)-createdAt(b):sort==="class"?textCompare(a.cls,b.cls)||textCompare(a.subject,b.subject):sort==="subject"?textCompare(a.subject,b.subject)||textCompare(a.chapter,b.chapter):sort==="chapter"?textCompare(a.chapter,b.chapter)||textCompare(a.subject,b.subject):createdAt(b)-createdAt(a));
  const list=$("questionList");
  if(!list)return;
  if($("questionResultCount"))$("questionResultCount").textContent="Showing "+filtered.length+" of "+questions.length+" questions";
@@ -238,6 +239,7 @@ $("timerStart").onclick=()=>{if(timer)return;timer=setInterval(()=>{remaining--;
 $("timerPause").onclick=()=>{clearInterval(timer);timer=null};$("timerReset").onclick=()=>{clearInterval(timer);timer=null;resetTimer()};resetTimer();
 async function syncQuestionsNow(){
  const key=localStorage.getItem("sc_admin_key")||"";
+ if(!remoteReady){toast("Cloud Question Bank load होने के बाद ही Sync करें");if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync: Load the remote bank before replacing it";return}
  if(!key){toast("पहले Settings में Admin Key सेव करें");if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync: Admin Key required";return}
  if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync: Uploading…";
  try{
