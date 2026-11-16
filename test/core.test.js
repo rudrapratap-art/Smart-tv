@@ -77,3 +77,45 @@ test("broadcast sends redacted state publicly and full state only to admin socke
   assert.equal(adminEvents[0].event, "admin-class-state");
   assert.equal(adminEvents[0].payload.questions[0].answer, 3);
 });
+
+test("question saves are append-only and never delete unseen rows", async () => {
+  const originalFetch = global.fetch;
+  const requests = [];
+  global.fetch = async (url, options) => {
+    requests.push({ url: String(url), method: options.method || "GET" });
+    return new Response("", { status: 204 });
+  };
+  try {
+    await db.saveQuestions([{
+      id: "new-question", cls: "Class 10", subject: "Science",
+      chapter: "Electricity", hi: "Question", en: "",
+      opts: ["A", "B", "C", "D"], answer: 1, explain: ""
+    }]);
+    assert.deepEqual(requests.map(request => request.method), ["POST"]);
+    assert.equal(requests.some(request => request.method === "DELETE"), false);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test("bulk deletion is limited to explicit unique IDs", async () => {
+  const originalFetch = global.fetch;
+  const requests = [];
+  global.fetch = async (url, options) => {
+    requests.push({ url: String(url), method: options.method });
+    return new Response(JSON.stringify([{ id: "q-1" }, { id: "q-2" }]), {
+      status: 200, headers: { "Content-Type": "application/json" }
+    });
+  };
+  try {
+    const count = await db.deleteQuestions(["q-1", "q-2", "q-1"]);
+    assert.equal(count, 2);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].method, "DELETE");
+    assert.match(requests[0].url, /id=in\./);
+    assert.match(requests[0].url, /q-1/);
+    assert.match(requests[0].url, /q-2/);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
