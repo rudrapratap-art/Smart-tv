@@ -5,6 +5,8 @@ const { Server } = require("socket.io");
 const db = require("./lib/supabase");
 const bot = require("./bot");
 const gemini = require("./lib/gemini");
+const { toDisplayState, broadcastClassroomState } = require("./lib/classroom-state");
+const crypto = require("crypto");
 
 const app = express();
 const server = http.createServer(app);
@@ -16,12 +18,23 @@ const DEFAULT_ROOM = String(process.env.CLASSROOM_ROOM || "CLASS10").toUpperCase
 const ADMIN_KEY = process.env.CLASSROOM_ADMIN_KEY || "";
 const WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || "";
 
+function safeEqual(left, right) {
+  const a = Buffer.from(String(left || ""));
+  const b = Buffer.from(String(right || ""));
+  return a.length === b.length && a.length > 0 && crypto.timingSafeEqual(a, b);
+}
+
 function requireAdmin(req, res, next) {
-  if (!ADMIN_KEY || req.get("x-admin-key") !== ADMIN_KEY) {
+  if (!safeEqual(req.get("x-admin-key"), ADMIN_KEY)) {
     return res.status(401).json({ error: "Unauthorized. Configure the classroom admin key." });
   }
   next();
 }
+
+io.use((socket, next) => {
+  socket.data.isAdmin = safeEqual(socket.handshake.auth?.adminKey, ADMIN_KEY);
+  next();
+});
 
 app.get("/health", (req, res) => res.json({
   ok: true,
@@ -30,7 +43,7 @@ app.get("/health", (req, res) => res.json({
   telegramConfigured: Boolean(process.env.TELEGRAM_BOT_TOKEN)
 }));
 
-app.get("/api/questions", async (req, res) => {
+app.get("/api/questions", requireAdmin, async (req, res) => {
   try {
     if (!db.isConfigured()) return res.status(503).json({ error: "Database is not configured" });
     res.set("Cache-Control", "no-store");
@@ -84,42 +97,56 @@ app.post("/telegram/webhook", async (req, res) => {
 io.on("connection", socket => {
   socket.on("join-room", async roomValue => {
     const room = String(roomValue || DEFAULT_ROOM).toUpperCase().slice(0, 24);
+    for (const joinedRoom of socket.rooms) {
+      if (joinedRoom !== socket.id) socket.leave(joinedRoom);
+    }
     socket.join(room);
     socket.emit("joined", room);
     try {
       const questions = db.isConfigured() ? await db.getQuestions() : [];
       const saved = db.isConfigured() ? await db.getClassroomState(room) : null;
+      let state;
       if (saved) {
         const filter = saved.filter || {};
-        saved.questions = questions.filter(q =>
-          (!filter.cls || filter.cls === "all" || String(q.cls) === String(filter.cls)) &&
-          (!filter.subject || String(q.subject) === String(filter.subject)) &&
-          (!filter.chapter || String(q.chapter) === String(filter.chapter)) &&
-          (!Array.isArray(filter.subjects) || !filter.subjects.length || filter.subjects.includes(String(q.subject))) &&
-          (!Array.isArray(filter.chapters) || !filter.chapters.length || filter.chapters.includes(String(q.chapter)))
-        );
-        if (!Number.isInteger(saved.index) || saved.index < 0 || saved.index >= saved.questions.length) saved.index = 0;
-        socket.emit("class-state", saved);
-      } else if (questions.length) {
-        socket.emit("class-state", { questions, index: 0, showAnswer: false, room, language: "both", progress: true });
+        state = {
+          ...saved,
+          room,
+          questions: questions.filter(q =>
+            (!filter.cls || filter.cls === "all" || String(q.cls) === String(filter.cls)) &&
+            (!filter.subject || String(q.subject) === String(filter.subject)) &&
+            (!filter.chapter || String(q.chapter) === String(filter.chapter)) &&
+            (!Array.isArray(filter.subjects) || !filter.subjects.length || filter.subjects.includes(String(q.subject))) &&
+            (!Array.isArray(filter.chapters) || !filter.chapters.length || filter.chapters.includes(String(q.chapter)))
+          )
+        };
+        if (!Number.isInteger(state.index) || state.index < 0 || state.index >= state.questions.length) state.index = 0;
+      } else {
+        state = { questions, index: 0, showAnswer: false, room, language: "both", progress: true };
       }
+      socket.emit("class-state", toDisplayState(state));
+      if (socket.data.isAdmin) socket.emit("admin-class-state", state);
     } catch (error) {
       console.error("Room initialization:", error.message);
     }
   });
 
   socket.on("class-state", async payload => {
+    if (!socket.data.isAdmin) {
+      socket.emit("write-denied", { error: "Teacher admin key required for classroom controls." });
+      return;
+    }
     if (!payload || typeof payload !== "object" || !payload.state || typeof payload.state !== "object") return;
     const room = String(payload.room || payload.state.room || DEFAULT_ROOM).toUpperCase().slice(0, 24);
+    if (!socket.rooms.has(room)) return;
     const state = { ...payload.state, room };
     if (!Array.isArray(state.questions)) return;
     state.index = Math.max(0, Math.min(Number(state.index) || 0, Math.max(0, state.questions.length - 1)));
     try {
       if (db.isConfigured()) await db.saveClassroomState(room, state);
-      io.to(room).emit("class-state", state);
+      await broadcastClassroomState(io, room, state);
     } catch (error) {
       console.error("Class state sync:", error.message);
-      socket.to(room).emit("class-state", state);
+      socket.emit("sync-error", { error: "Classroom state could not be saved." });
     }
   });
 });
