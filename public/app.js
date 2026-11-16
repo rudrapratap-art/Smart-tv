@@ -14,6 +14,19 @@ let questions=loadJson("sc_questions",null)||[
 ];
 if(!Array.isArray(questions))questions=[];
 let selectedQuestionIds = new Set();
+async function deleteRemoteQuestions(ids){
+ const key=localStorage.getItem("sc_admin_key")||"";
+ if(!remoteReady||!key||!ids?.length)return;
+ try{
+  const response=await fetch("/api/questions",{method:"DELETE",headers:{"Content-Type":"application/json","X-Admin-Key":key},body:JSON.stringify({ids})});
+  const data=await response.json();if(!response.ok)throw new Error(data.error||("HTTP "+response.status));
+  if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync: Deleted "+(data.count||0)+" questions";
+ }catch(error){
+  console.error("Cloud question delete failed:",error);
+  if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud delete failed: "+error.message;
+  toast("Cloud delete failed — फिर Sync करें");
+ }
+}
 function persist(){
  localStorage.setItem("sc_questions",JSON.stringify(questions));
  $("totalCount").textContent=questions.length;
@@ -76,6 +89,12 @@ if(socket){
  }
  socket.on("class-state",s=>applyIncomingState(s,false));
  socket.on("admin-class-state",s=>applyIncomingState(s,true));
+ socket.on("question-bank",bank=>{
+  if(!Array.isArray(bank))return;
+  questions=bank;localStorage.setItem("sc_questions",JSON.stringify(questions));remoteReady=true;
+  $("totalCount").textContent=questions.length;renderList();renderController();
+  if(typeof updateDashboardOverview==="function")updateDashboardOverview();
+ });
  socket.on("write-denied",()=>{$("connectionStatus").textContent="Connected • Teacher key required"});
  socket.on("sync-error",()=>toast("Classroom sync failed"));
  socket.on("disconnect",()=>{$("connectionStatus").textContent="Offline"});
@@ -84,7 +103,10 @@ async function bootstrapRemote(){
  if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync: Checking…";
  try{
   const adminKey=localStorage.getItem("sc_admin_key")||"";
-  if(!adminKey){if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync: Teacher Admin Key required";return}
+  if(!adminKey){
+   if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync: Teacher Admin Key required";
+   $("totalCount").textContent=questions.length;renderList();renderController();return;
+  }
   const response=await fetch("/api/questions",{cache:"no-store",headers:{"X-Admin-Key":adminKey}});
   if(response.ok){
    const data=await response.json();
@@ -193,7 +215,7 @@ function renderList(){
  });
  list.querySelectorAll("[data-del]").forEach(b=>b.onclick=()=>{
   const id=String(b.dataset.del);if(!confirm("क्या आप यह प्रश्न delete करना चाहते हैं?"))return;
-  questions=questions.filter(q=>String(q.id)!==id);selectedQuestionIds.delete(id);index=Math.min(index,Math.max(0,questions.length-1));persist();
+  questions=questions.filter(q=>String(q.id)!==id);selectedQuestionIds.delete(id);index=Math.min(index,Math.max(0,questions.length-1));persist();deleteRemoteQuestions([id]);
  });
  list.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>editQuestion(b.dataset.edit));
 }
@@ -206,7 +228,7 @@ if($("clearFilters"))$("clearFilters").onclick=()=>{
  selectedQuestionIds.clear();renderList();
 };
 if($("selectAllFiltered"))$("selectAllFiltered").onchange=e=>{getFilteredQuestions().forEach(q=>{const id=String(q.id);if(e.target.checked)selectedQuestionIds.add(id);else selectedQuestionIds.delete(id)});renderList()};
-if($("deleteSelected"))$("deleteSelected").onclick=()=>{const ids=new Set(selectedQuestionIds);if(!ids.size)return;if(!confirm(`${ids.size} selected questions delete करें? यह action वापस नहीं होगा।`))return;questions=questions.filter(q=>!ids.has(String(q.id)));selectedQuestionIds.clear();index=Math.min(index,Math.max(0,questions.length-1));persist();toast("Selected questions deleted")};
+if($("deleteSelected"))$("deleteSelected").onclick=()=>{const ids=new Set(selectedQuestionIds);if(!ids.size)return;if(!confirm(`${ids.size} selected questions delete करें? यह action वापस नहीं होगा।`))return;questions=questions.filter(q=>!ids.has(String(q.id)));selectedQuestionIds.clear();index=Math.min(index,Math.max(0,questions.length-1));persist();deleteRemoteQuestions([...ids]);toast("Selected questions deleted")};
 function clearForm(){editing=null;["qChapter","qHi","qEn","optA","optB","optC","optD","qExplanation"].forEach(id=>$(id).value="");$("qAnswer").value="0";$("editorTitle").textContent="Add Question"}
 function setSelectValue(select,value){
  const v=String(value||"");
