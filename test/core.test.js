@@ -83,7 +83,7 @@ test("question saves are append-only and never delete unseen rows", async () => 
   const requests = [];
   global.fetch = async (url, options) => {
     requests.push({ url: String(url), method: options.method || "GET" });
-    return new Response("", { status: 204 });
+    return new Response(null, { status: 204 });
   };
   try {
     await db.saveQuestions([{
