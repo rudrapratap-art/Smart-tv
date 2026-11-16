@@ -119,3 +119,33 @@ test("bulk deletion is limited to explicit unique IDs", async () => {
     global.fetch = originalFetch;
   }
 });
+
+test("pagination does not stop early when Content-Range total is unknown", async () => {
+  const originalFetch = global.fetch;
+  const rows = Array.from({ length: 23 }, (_, index) => ({
+    id: String(index + 1), cls: "Class 10", subject: "Science",
+    chapter: "Electricity", hi: "Q" + index, en: "", opts: ["A", "B", "C", "D"],
+    answer: 0, explain: ""
+  }));
+  const ranges = [];
+  global.fetch = async (_url, options) => {
+    const start = Number(options.headers.Range.split("-")[0]);
+    ranges.push(options.headers.Range);
+    const page = rows.slice(start, start + 5);
+    const end = page.length ? start + page.length - 1 : start;
+    return new Response(JSON.stringify(page), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Range": page.length ? `${start}-${end}/*` : "*/*"
+      }
+    });
+  };
+  try {
+    const questions = await db.getQuestions();
+    assert.equal(questions.length, 23);
+    assert.equal(ranges.length, 5);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
