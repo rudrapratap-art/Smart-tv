@@ -11,7 +11,7 @@ const crypto = require("crypto");
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: false } });
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "10mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 const DEFAULT_ROOM = String(process.env.CLASSROOM_ROOM || "CLASS10").toUpperCase();
@@ -29,6 +29,14 @@ function requireAdmin(req, res, next) {
     return res.status(401).json({ error: "Unauthorized. Configure the classroom admin key." });
   }
   next();
+}
+
+async function broadcastQuestionBank() {
+  const questions = await db.getQuestions();
+  const sockets = await io.fetchSockets();
+  for (const socket of sockets) {
+    if (socket.data?.isAdmin) socket.emit("question-bank", questions);
+  }
 }
 
 io.use((socket, next) => {
@@ -75,10 +83,27 @@ app.put("/api/questions", requireAdmin, async (req, res) => {
     if (!Array.isArray(req.body?.questions)) return res.status(400).json({ error: "questions must be an array" });
     if (req.body.questions.length > 5000) return res.status(413).json({ error: "Question limit exceeded" });
     const questions = await db.saveQuestions(req.body.questions);
+    await broadcastQuestionBank();
     res.json({ ok: true, count: questions.length });
   } catch (error) {
     console.error("Save questions API:", error.message);
     res.status(500).json({ error: "Unable to save questions" });
+  }
+});
+
+app.delete("/api/questions", requireAdmin, async (req, res) => {
+  try {
+    if (!db.isConfigured()) return res.status(503).json({ error: "Database is not configured" });
+    const ids = req.body?.ids;
+    if (!Array.isArray(ids) || ids.length < 1 || ids.length > 5000) {
+      return res.status(400).json({ error: "ids must be an array containing 1–5000 question IDs" });
+    }
+    const count = await db.deleteQuestions(ids);
+    await broadcastQuestionBank();
+    res.json({ ok: true, count });
+  } catch (error) {
+    console.error("Delete questions API:", error.message);
+    res.status(500).json({ error: "Unable to delete questions" });
   }
 });
 
