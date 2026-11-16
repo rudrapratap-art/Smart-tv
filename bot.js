@@ -972,10 +972,13 @@ async function handleUpdate(update, io) {
     if (command === "/add") {
       const question = parseQuestionFields(arg);
       question.id = `tg_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-      questions.push(question);
-      await db.saveQuestions(questions);
-      state.questions = questions;
-      state.index = questions.length - 1;
+      await db.appendQuestions([question]);
+      const updatedBank = await db.getQuestions();
+      const updatedActive = filterQuestionBank(updatedBank, state.filter || {});
+      state.questions = updatedActive;
+      const addedIndex = updatedActive.findIndex(q => String(q.id) === String(question.id));
+      if (addedIndex >= 0) state.index = addedIndex;
+      else state.index = Math.max(0, Math.min(state.index, updatedActive.length - 1));
       state.showAnswer = false;
       await publish(io, room, state);
       await reply(chatId, `✅ Question add हो गया। ID: <code>${escapeHtml(question.id)}</code>`);
@@ -986,11 +989,14 @@ async function handleUpdate(update, io) {
       const separator = arg.indexOf("|");
       if (separator < 0) throw new Error("/edit ID | Class | Subject | Chapter | Hindi | English | A | B | C | D | Answer | Explanation");
       const id = arg.slice(0, separator).trim();
-      const index = questions.findIndex(q => String(q.id) === id);
-      if (index < 0) throw new Error("इस ID का question नहीं मिला। /list देखें।");
-      questions[index] = { ...parseQuestionFields(arg.slice(separator + 1)), id };
-      await db.saveQuestions(questions);
-      state.questions = questions;
+      const questionIndex = questions.findIndex(q => String(q.id) === id);
+      if (questionIndex < 0) throw new Error("इस ID का question नहीं मिला। /list देखें।");
+      questions[questionIndex] = { ...parseQuestionFields(arg.slice(separator + 1)), id };
+      await db.saveQuestions([questions[questionIndex]]);
+      const updatedBank = await db.getQuestions();
+      state.questions = filterQuestionBank(updatedBank, state.filter || {});
+      state.index = Math.max(0, Math.min(state.index, state.questions.length - 1));
+      state.showAnswer = false;
       await publish(io, room, state);
       await reply(chatId, "✅ Question update हो गया।");
       return;
@@ -998,11 +1004,11 @@ async function handleUpdate(update, io) {
 
     if (command === "/delete") {
       if (!arg) throw new Error("Usage: /delete QUESTION_ID");
-      const filtered = questions.filter(q => String(q.id) !== arg);
-      if (filtered.length === questions.length) throw new Error("इस ID का question नहीं मिला।");
-      await db.saveQuestions(filtered);
-      state.questions = filtered;
-      state.index = Math.max(0, Math.min(state.index, filtered.length - 1));
+      if (!questions.some(q => String(q.id) === arg)) throw new Error("इस ID का question नहीं मिला।");
+      await db.deleteQuestions([arg]);
+      const updatedBank = await db.getQuestions();
+      state.questions = filterQuestionBank(updatedBank, state.filter || {});
+      state.index = Math.max(0, Math.min(state.index, state.questions.length - 1));
       state.showAnswer = false;
       await publish(io, room, state);
       await reply(chatId, "🗑️ Question delete हो गया।");
