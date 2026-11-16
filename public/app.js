@@ -1,5 +1,5 @@
 const $=id=>document.getElementById(id);
-const socket=window.io?io():null;
+const socket=window.io?io({auth:{adminKey:localStorage.getItem("sc_admin_key")||""}}):null;
 function loadJson(key,fallback){try{const value=JSON.parse(localStorage.getItem(key)||"null");return value??fallback}catch(err){console.warn("Invalid local data:",key,err);return fallback}}
 let room="CLASS10", index=0, showAnswer=false, timer=null, remaining=30, editing=null, remoteReady=false;
 let questions=loadJson("sc_questions",null)||[
@@ -43,13 +43,17 @@ function state(){
   progress:$("showProgress")?.checked!==false
  };
 }
-function broadcast(){if(socket)socket.emit("class-state",{room,state:state()});}
+function broadcast(){
+ if(!socket)return;
+ if(!socket.auth?.adminKey){$("connectionStatus").textContent="Connected • Teacher key required";return}
+ socket.emit("class-state",{room,state:state()});
+}
 if(socket){
  socket.on("connect",()=>{$("connectionStatus").textContent="Connected";socket.emit("join-room",room)});
  socket.on("joined",()=>{$("connectionStatus").textContent="Connected"});
- socket.on("class-state",s=>{
+ function applyIncomingState(s, includeBank){
   if(!s)return;
-  if(Array.isArray(s.questions)){
+  if(includeBank&&Array.isArray(s.questions)){
    const merged=new Map(questions.map(q=>[String(q.id),q]));
    s.questions.forEach(q=>merged.set(String(q.id),q));
    questions=[...merged.values()];
@@ -65,22 +69,26 @@ if(socket){
     subjects:Array.isArray(s.filter.subjects)?s.filter.subjects:(s.filter.subject?[s.filter.subject]:[]),
     chapters:Array.isArray(s.filter.chapters)?s.filter.chapters:(s.filter.chapter?[s.filter.chapter]:[])
    };
-  }else{
-   controllerFilter={cls:"all",subjects:[],chapters:[]};
-  }
+  }else controllerFilter={cls:"all",subjects:[],chapters:[]};
   index=Math.max(0,Math.min(Number(s.index)||0,Math.max(0,getControllerQuestions().length-1)));
   showAnswer=!!s.showAnswer;
   renderController();
- });
+ }
+ socket.on("class-state",s=>applyIncomingState(s,false));
+ socket.on("admin-class-state",s=>applyIncomingState(s,true));
+ socket.on("write-denied",()=>{$("connectionStatus").textContent="Connected • Teacher key required"});
+ socket.on("sync-error",()=>toast("Classroom sync failed"));
  socket.on("disconnect",()=>{$("connectionStatus").textContent="Offline"});
 }
 async function bootstrapRemote(){
  if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync: Checking…";
  try{
-  const response=await fetch("/api/questions",{cache:"no-store"});
+  const adminKey=localStorage.getItem("sc_admin_key")||"";
+  if(!adminKey){if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync: Teacher Admin Key required";return}
+  const response=await fetch("/api/questions",{cache:"no-store",headers:{"X-Admin-Key":adminKey}});
   if(response.ok){
    const data=await response.json();
-   if(Array.isArray(data.questions)&&data.questions.length){questions=data.questions;localStorage.setItem("sc_questions",JSON.stringify(questions))}
+   if(Array.isArray(data.questions)){questions=data.questions;localStorage.setItem("sc_questions",JSON.stringify(questions))}
    remoteReady=true;
    if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync: Connected • "+questions.length+" questions loaded";
   }else if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync unavailable — using local data";
@@ -240,6 +248,7 @@ $("timerPause").onclick=()=>{clearInterval(timer);timer=null};$("timerReset").on
 async function syncQuestionsNow(){
  const key=localStorage.getItem("sc_admin_key")||"";
  if(!remoteReady){toast("Cloud Question Bank load होने के बाद ही Sync करें");if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync: Load the remote bank before replacing it";return}
+ if(!remoteReady){toast("Cloud Question Bank load होने के बाद ही Sync करें");if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync: Load the remote bank before replacing it";return}
  if(!key){toast("पहले Settings में Admin Key सेव करें");if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync: Admin Key required";return}
  if($("cloudSyncStatus"))$("cloudSyncStatus").textContent="Cloud sync: Uploading…";
  try{
@@ -255,6 +264,7 @@ $("saveSettings").onclick=()=>{
  const dark=!!$("darkMode")?.checked;document.body.classList.toggle("dark-mode",dark);localStorage.setItem("sc_dark_mode",dark?"1":"0");
  const adminKey=$("adminApiKey")?.value.trim()||"";
  if(adminKey)localStorage.setItem("sc_admin_key",adminKey);else localStorage.removeItem("sc_admin_key");
+ if(socket){socket.auth={adminKey};if(socket.connected)socket.disconnect();socket.connect();}
  broadcast();toast("Settings saved");
 };
 $("displayLanguage").value=localStorage.getItem("sc_language")||"both";$("questionOrder").value=localStorage.getItem("sc_order")||"normal";if($("adminApiKey"))$("adminApiKey").value=localStorage.getItem("sc_admin_key")||"";const darkModeEnabled=localStorage.getItem("sc_dark_mode")==="1";document.body.classList.toggle("dark-mode",darkModeEnabled);if($("darkMode"))$("darkMode").checked=darkModeEnabled;
