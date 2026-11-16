@@ -40,3 +40,38 @@ create table if not exists public.telegram_quiz_sessions (
 alter table public.telegram_quiz_sessions enable row level security;
 revoke all on public.telegram_quiz_sessions from anon, authenticated;
 grant all on public.telegram_quiz_sessions to service_role;
+
+ 
+-- Telegram group quiz records and one-response-per-student enforcement.
+create table if not exists public.telegram_quizzes (
+  id text primary key,
+  room text not null,
+  chat_id text not null,
+  message_id bigint,
+  question_id text not null,
+  question_text text not null,
+  options jsonb not null default '[]'::jsonb,
+  correct_answer smallint not null check (correct_answer between 0 and 3),
+  active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+create unique index if not exists telegram_quizzes_one_active_per_room
+  on public.telegram_quizzes (room) where active = true;
+
+create table if not exists public.telegram_quiz_responses (
+  quiz_id text not null,
+  user_id text not null,
+  display_name text not null,
+  selected_option smallint not null check (selected_option between 0 and 3),
+  is_correct boolean not null,
+  created_at timestamptz not null default now(),
+  primary key (quiz_id, user_id)
+);
+
+alter table public.telegram_quizzes enable row level security;
+alter table public.telegram_quiz_responses enable row level security;
+revoke all on public.telegram_quizzes from anon, authenticated;
+revoke all on public.telegram_quiz_responses from anon, authenticated;
+grant all on public.telegram_quizzes to service_role;
+grant all on public.telegram_quiz_responses to service_role;
