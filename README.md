@@ -23,7 +23,7 @@ Set these in Render Dashboard → your Web Service → Environment:
 - `PUBLIC_BASE_URL` (Render HTTPS URL, no trailing slash)
 - `TELEGRAM_WEBHOOK_SECRET` (random secret, 32+ characters)
 - `CLASSROOM_ROOM` (optional, defaults to CLASS10)
-- `CLASSROOM_ADMIN_KEY` (optional API key for protected dashboard database writes)
+- `CLASSROOM_ADMIN_KEY` (required for the teacher dashboard to read the private question bank, use AI generation, and control the classroom; keep it private)
 
 ## Telegram commands
 - `/start` or `/help` — help
@@ -49,7 +49,7 @@ Set these in Render Dashboard → your Web Service → Environment:
 - `/quizstop` — stop the quiz and return to normal mode
 - `/quizstatus` — show quiz configuration and remaining time
 
-The bot is restricted to the Telegram user ID configured in `TELEGRAM_ADMIN_ID`. The webhook endpoint checks Telegram's secret-token header. The Supabase service key is used only on the Node server.
+The bot is restricted to the Telegram user ID configured in `TELEGRAM_ADMIN_ID`. The webhook endpoint checks Telegram's secret-token header. The Supabase service key is used only on the Node server. The public TV view is read-only; the teacher dashboard must be configured with `CLASSROOM_ADMIN_KEY`. The question API and teacher Socket.IO writes reject unauthenticated clients, and unrevealed answers are removed from public TV updates.
 
 ## Database
 Apply `supabase/schema.sql` once in Supabase SQL Editor. RLS is enabled and browser roles have no table privileges; only the backend service role can access the tables.
