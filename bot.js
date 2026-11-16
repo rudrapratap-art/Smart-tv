@@ -1,5 +1,6 @@
 const db = require("./lib/supabase");
 const gemini = require("./lib/gemini");
+const { broadcastClassroomState } = require("./lib/classroom-state");
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const ADMIN_IDS = new Set([...(process.env.TELEGRAM_ADMIN_IDS || "").split(","), process.env.TELEGRAM_ADMIN_ID || ""] .map(id => id.trim()).filter(Boolean));
@@ -415,7 +416,7 @@ async function getState(room, questions) {
 async function publish(io, room, state) {
   state.room = room;
   await db.saveClassroomState(room, state);
-  io.to(room).emit("class-state", state);
+  await broadcastClassroomState(io, room, state);
 }
 
 function parseQuestionFields(raw, offset = 0) {
@@ -665,13 +666,12 @@ async function handleUpdate(update, io) {
           return true;
         });
         if (!additions.length) { await reply(chatId, "ℹ️ सभी generated questions पहले से मौजूद हैं। कोई बदलाव नहीं हुआ।"); return; }
-        await db.appendQuestions(additions);
-        const savedBank = await db.getQuestions();
-        const savedIds = new Set(savedBank.map(q => String(q.id)));
-        const verifiedCount = additions.filter(q => savedIds.has(String(q.id))).length;
+        const appendedRows = await db.appendQuestions(additions);
+        const verifiedCount = appendedRows.length;
         if (verifiedCount !== additions.length) {
-          throw new Error("केवल " + verifiedCount + "/" + additions.length + " questions Supabase में verify हुए।");
+          throw new Error("केवल " + verifiedCount + "/" + additions.length + " questions Supabase में save हुए।");
         }
+        const savedBank = await db.getQuestions();
         const state = await getState(DEFAULT_ROOM, savedBank);
         state.questions = savedBank;
         await publish(io, DEFAULT_ROOM, state);
