@@ -78,6 +78,17 @@ async function showQuizStopKeyboard(chatId) {
   });
 }
 
+function getQuizOptions(options, language = "both") {
+  return (Array.isArray(options) ? options : []).map(option => {
+    const value = String(option ?? "").trim();
+    if (language === "both") return value;
+    // AI bilingual options are stored as: Hindi text (English text).
+    const match = value.match(/^([\\s\\S]*?)\\s+\\(([^()]*)\\)\\s*$/);
+    if (!match || !/[\\u0900-\\u097F]/.test(match[1]) || !/[A-Za-z]/.test(match[2])) return value;
+    return language === "en" ? match[2].trim() : match[1].trim();
+  });
+}
+
 async function sendQuizQuestion(chatId, room, run) {
   if (run.stopped || activeQuizRuns.get(String(chatId)) !== run) return;
   const q = run.questions[run.index];
@@ -87,6 +98,7 @@ async function sendQuizQuestion(chatId, room, run) {
   });
   const quizId = "qz_" + Date.now() + "_" + Math.floor(Math.random() * 1000000);
   const language = run.language || "both";
+  const displayOptions = getQuizOptions(q.opts, language);
   const questionText = language === "en"
     ? (q.en || q.hi || "")
     : language === "hi"
@@ -95,7 +107,7 @@ async function sendQuizQuestion(chatId, room, run) {
   const quiz = await db.startTelegramQuiz({
     id: quizId, room, chat_id: String(chatId), message_id: null,
     question_id: String(q.id), question_text: questionText,
-    options: q.opts, correct_answer: Number(q.answer), active: true
+    options: displayOptions, correct_answer: Number(q.answer), active: true
   });
   run.quizIds.push(quiz.id);
   const keyboard = q.opts.map((option, index) => [{
@@ -132,7 +144,7 @@ async function sendQuizQuestion(chatId, room, run) {
   if (run.revealTimer) clearTimeout(run.revealTimer);
       const responses = await db.getTelegramQuizResponses(quiz.id).catch(() => []);
       const correctIndex = Number(q.answer);
-      const correctOption = q.opts?.[correctIndex] || "";
+      const correctOption = displayOptions?.[correctIndex] || "";
       const correctLetter = ["A", "B", "C", "D"][correctIndex] || "—";
       const correctCount = responses.filter(item => item.is_correct).length;
       const revealText = run.messageText +
