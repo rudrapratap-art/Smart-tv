@@ -83,8 +83,8 @@ function getQuizOptions(options, language = "both") {
     const value = String(option ?? "").trim();
     if (language === "both") return value;
     // AI bilingual options are stored as: Hindi text (English text).
-    const match = value.match(/^([\\s\\S]*?)\\s+\\(([^()]*)\\)\\s*$/);
-    if (!match || !/[\\u0900-\\u097F]/.test(match[1]) || !/[A-Za-z]/.test(match[2])) return value;
+    const match = value.match(/^([\s\S]*?)\s+\(([^()]*)\)\s*$/);
+    if (!match || !/[\u0900-\u097F]/.test(match[1]) || !/[A-Za-z]/.test(match[2])) return value;
     return language === "en" ? match[2].trim() : match[1].trim();
   });
 }
