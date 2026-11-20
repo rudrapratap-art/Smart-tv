@@ -110,7 +110,7 @@ async function sendQuizQuestion(chatId, room, run) {
     options: displayOptions, correct_answer: Number(q.answer), active: true
   });
   run.quizIds.push(quiz.id);
-  const keyboard = q.opts.map((option, index) => [{
+  const keyboard = displayOptions.map((option, index) => [{
     text: String.fromCharCode(65 + index) + ". " + String(option).slice(0, 55),
     callback_data: "qz:" + quiz.id + ":" + index
   }]);
