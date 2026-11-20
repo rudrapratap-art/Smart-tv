@@ -111,16 +111,20 @@ async function sendQuizQuestion(chatId, room, run) {
   });
   run.quizIds.push(quiz.id);
   const keyboard = displayOptions.map((option, index) => [{
-    text: String.fromCharCode(65 + index) + ". " + String(option).slice(0, 55),
+    text: String.fromCharCode(65 + index),
     callback_data: "qz:" + quiz.id + ":" + index
   }]);
+  const optionsText = displayOptions.map((option, index) =>
+    "<b>" + String.fromCharCode(65 + index) + ".</b> " + escapeHtml(option)
+  ).join("\\n\\n");
   run.deadline = Date.now() + (run.quizTimePerQuestion || QUIZ_QUESTION_SECONDS) * 1000;
   run.messageText = "📝 <b>SMART CLASSROOM LIVE QUIZ</b>\n\n" +
     "🎓 " + escapeHtml(q.cls) + " • " + escapeHtml(q.subject) + "\n" +
     "📖 " + escapeHtml(q.chapter) + "\n" +
     "🔢 प्रश्न " + (run.index + 1) + "/" + run.questions.length + "\n" +
     "\n\n" +
-    "<b>" + escapeHtml(questionText) + "</b>";
+    "<b>" + escapeHtml(questionText) + "</b>" +
+    "\\n\\n" + optionsText;
   const sentMessage = await telegram("sendMessage", {
     chat_id: chatId, text: run.messageText, parse_mode: "HTML",
     reply_markup: { inline_keyboard: keyboard }
