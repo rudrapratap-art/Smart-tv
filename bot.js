@@ -124,7 +124,7 @@ async function sendQuizQuestion(chatId, room, run) {
     "🔢 प्रश्न " + (run.index + 1) + "/" + run.questions.length + "\n" +
     "\n\n" +
     "<b>" + escapeHtml(questionText) + "</b>" +
-    "\\n\\n" + optionsText;
+    "\n\n" + optionsText;
   const sentMessage = await telegram("sendMessage", {
     chat_id: chatId, text: run.messageText, parse_mode: "HTML",
     reply_markup: { inline_keyboard: keyboard }
