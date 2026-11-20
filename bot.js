@@ -91,7 +91,7 @@ async function sendQuizQuestion(chatId, room, run) {
     ? (q.en || q.hi || "")
     : language === "hi"
       ? (q.hi || q.en || "")
-      : [q.hi, q.en].filter(Boolean).join("\\n\\n");
+      : [q.hi, q.en].filter(Boolean).join("\n\n");
   const quiz = await db.startTelegramQuiz({
     id: quizId, room, chat_id: String(chatId), message_id: null,
     question_id: String(q.id), question_text: questionText,
