@@ -116,7 +116,7 @@ async function sendQuizQuestion(chatId, room, run) {
   }]);
   const optionsText = displayOptions.map((option, index) =>
     "<b>" + String.fromCharCode(65 + index) + ".</b> " + escapeHtml(option)
-  ).join("\\n\\n");
+  ).join("\n\n");
   run.deadline = Date.now() + (run.quizTimePerQuestion || QUIZ_QUESTION_SECONDS) * 1000;
   run.messageText = "📝 <b>SMART CLASSROOM LIVE QUIZ</b>\n\n" +
     "🎓 " + escapeHtml(q.cls) + " • " + escapeHtml(q.subject) + "\n" +
