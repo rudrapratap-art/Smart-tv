@@ -86,7 +86,12 @@ async function sendQuizQuestion(chatId, room, run) {
     current_index: run.index, active: true, status: "asking"
   });
   const quizId = "qz_" + Date.now() + "_" + Math.floor(Math.random() * 1000000);
-  const questionText = q.hi || q.en;
+  const language = run.language || "both";
+  const questionText = language === "en"
+    ? (q.en || q.hi || "")
+    : language === "hi"
+      ? (q.hi || q.en || "")
+      : [q.hi, q.en].filter(Boolean).join("\\n\\n");
   const quiz = await db.startTelegramQuiz({
     id: quizId, room, chat_id: String(chatId), message_id: null,
     question_id: String(q.id), question_text: questionText,
@@ -297,8 +302,7 @@ async function previewRestoreDocument(message) {
     reply_markup: { inline_keyboard: [[
       { text: "✅ Confirm Restore", callback_data: "restore_confirm" },
       { text: "❌ Cancel", callback_data: "restore_cancel" }
-    ]] }
-  });
+    ]] }  });
 }
 
 async function commitRestore(chatId, incoming, io, room) {
@@ -549,6 +553,50 @@ async function previewCsvDocument(message) {
   });
 }
 
+
+async function startTelegramGroupQuiz(chatId, room, io, language = "both") {
+  if (!db.isConfigured()) throw new Error("Quiz के लिए Supabase configuration जरूरी है।");
+  const bank = await db.getQuestions();
+  const saved = await getState(room, bank);
+  const candidates = filterQuestionBank(bank, saved.filter || {});
+  if (!candidates.length) throw new Error("पहले 🎓 Select Questions से Chapter चुनें या Question Bank में सवाल जोड़ें।");
+  const telegramQuestionCount = Number(saved.telegramQuizQuestionCount || candidates.length);
+  if (!Number.isInteger(telegramQuestionCount) || telegramQuestionCount < 1) {
+    throw new Error("पहले /setquestions से Telegram quiz के सवालों की संख्या सेट करें।");
+  }
+  if (telegramQuestionCount > candidates.length) {
+    throw new Error("इस Class/Subject/Chapter में केवल " + candidates.length + " सवाल हैं। /setquestions की संख्या कम करें या दूसरा Chapter चुनें।");
+  }
+  const telegramQuestions = candidates.slice(0, telegramQuestionCount);
+  const previousRun = activeQuizRuns.get(String(chatId));
+  if (previousRun) await finishQuizRun(chatId, room, previousRun, true);
+  const quizRoom = `${room}_${chatId}`;
+  const pqSeconds = Number(saved.telegramQuizTimePerQuestion || QUIZ_QUESTION_SECONDS);
+  const durationMinutes = Number(saved.telegramQuizDurationMinutes || 0);
+  const run = {
+    room: quizRoom, questions: telegramQuestions, index: 0, quizIds: [],
+    timer: null, countdownTimer: null, revealTimer: null, durationTimer: null,
+    stopped: false, quizTimePerQuestion: pqSeconds, language
+  };
+  activeQuizRuns.set(String(chatId), run);
+  await db.saveTelegramQuizSession({ chat_id: String(chatId), room: quizRoom, questions: telegramQuestions, current_index: 0, active: true, status: "asking" });
+  await showQuizStopKeyboard(chatId);
+  if (durationMinutes > 0) {
+    run.durationTimer = setTimeout(() => {
+      if (!run.stopped && activeQuizRuns.get(String(chatId)) === run) {
+        finishQuizRun(chatId, quizRoom, run, true).catch(error => console.error("Quiz duration stop:", error.message));
+      }
+    }, durationMinutes * 60 * 1000);
+  }
+  await sendQuizQuestion(chatId, quizRoom, run);
+  await telegram("sendMessage", {
+    chat_id: chatId,
+    text: "✅ Telegram Group Quiz शुरू हो गया।\n🌐 भाषा: " + ({ hi: "हिन्दी", en: "English", both: "हिन्दी + English" }[language] || "हिन्दी + English") +
+      "\n⏱️ हर सवाल: " + pqSeconds + " सेकंड" +
+      (durationMinutes > 0 ? "\nकुल अवधि: " + durationMinutes + " मिनट" : "")
+  });
+}
+
 async function handleUpdate(update, io) {
   if (update?.callback_query) {
     const callback = update.callback_query;
@@ -597,14 +645,29 @@ async function handleUpdate(update, io) {
           parse_mode: "HTML",
           reply_markup: callback.message.reply_markup
         });
-      } catch (error) {
-        console.error("Quiz response:", error.message);
+      } catch (error) {        console.error("Quiz response:", error.message);
         await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "उत्तर सेव नहीं हुआ। फिर कोशिश करें।", show_alert: true });
       }
       return;
     }
     if (!isAuthorizedAdmin(senderId)) {
       await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "Unauthorized", show_alert: true });
+      return;
+    }
+    if (String(callback.data || "").startsWith("quiz_lang:")) {
+      const language = String(callback.data).split(":")[1];
+      if (!["hi", "en", "both"].includes(language) || !["group", "supergroup"].includes(callback.message?.chat?.type)) {
+        await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "Invalid quiz language selection", show_alert: true });
+        return;
+      }
+      await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "Quiz शुरू किया जा रहा है…" });
+      await telegram("editMessageReplyMarkup", { chat_id: chatId, message_id: callback.message.message_id, reply_markup: { inline_keyboard: [] } });
+      try {
+        await startTelegramGroupQuiz(chatId, DEFAULT_ROOM, io, language);
+      } catch (error) {
+        console.error("Telegram quiz start:", error.message);
+        await reply(chatId, "⚠️ " + escapeHtml(error.message), mainKeyboard);
+      }
       return;
     }
     if (callback.data === "ai_cancel") {
@@ -847,44 +910,14 @@ async function handleUpdate(update, io) {
         return;
       }
       if (!db.isConfigured()) throw new Error("Quiz के लिए Supabase configuration जरूरी है।");
-      const bank = await db.getQuestions();
-      const saved = await getState(room, bank);
-      const candidates = filterQuestionBank(bank, saved.filter || {});
-      if (!candidates.length) throw new Error("पहले 🎓 Select Questions से Chapter चुनें या Question Bank में सवाल जोड़ें।");
-      // Question count belongs only to the Telegram group quiz.
-      const telegramQuestionCount = Number(saved.telegramQuizQuestionCount || candidates.length);
-      if (!Number.isInteger(telegramQuestionCount) || telegramQuestionCount < 1) {
-        throw new Error("पहले /setquestions से Telegram quiz के सवालों की संख्या सेट करें।");
-      }
-      if (telegramQuestionCount > candidates.length) {
-        throw new Error("इस Class/Subject/Chapter में केवल " + candidates.length + " सवाल हैं। /setquestions की संख्या कम करें या दूसरा Chapter चुनें।");
-      }
-      const telegramQuestions = candidates.slice(0, telegramQuestionCount);
-      const previousRun = activeQuizRuns.get(String(chatId));
-      if (previousRun) await finishQuizRun(chatId, room, previousRun, true);
-      const quizRoom = `${room}_${chatId}`;
-      const pqSeconds = Number(saved.telegramQuizTimePerQuestion || QUIZ_QUESTION_SECONDS);
-      const durationMinutes = Number(saved.telegramQuizDurationMinutes || 0);
-      const run = {
-        room: quizRoom, questions: telegramQuestions, index: 0, quizIds: [],
-        timer: null, countdownTimer: null, revealTimer: null, durationTimer: null,
-        stopped: false, quizTimePerQuestion: pqSeconds
-      };
-      activeQuizRuns.set(String(chatId), run);
-      await db.saveTelegramQuizSession({ chat_id: String(chatId), room: quizRoom, questions: telegramQuestions, current_index: 0, active: true, status: "asking" });
-      await showQuizStopKeyboard(chatId);
-      if (durationMinutes > 0) {
-        run.durationTimer = setTimeout(() => {
-          if (!run.stopped && activeQuizRuns.get(String(chatId)) === run) {
-            finishQuizRun(chatId, quizRoom, run, true).catch(error => console.error("Quiz duration stop:", error.message));
-          }
-        }, durationMinutes * 60 * 1000);
-      }
-      await sendQuizQuestion(chatId, quizRoom, run);
       await telegram("sendMessage", {
         chat_id: chatId,
-        text: "✅ Telegram Group Quiz शुरू हो गया। हर सवाल: " + pqSeconds + " सेकंड" +
-          (durationMinutes > 0 ? "\nकुल अवधि: " + durationMinutes + " मिनट" : "")
+        text: "🌐 <b>Quiz की भाषा चुनें</b>\nकिस भाषा में प्रश्न और विकल्प दिखाने हैं?",
+        parse_mode: "HTML",
+        reply_markup: { inline_keyboard: [
+          [{ text: "🇮🇳 हिन्दी", callback_data: "quiz_lang:hi" }, { text: "🇬🇧 English", callback_data: "quiz_lang:en" }],
+          [{ text: "🌐 हिन्दी + English", callback_data: "quiz_lang:both" }]
+        ] }
       });
       return;
     }
@@ -897,8 +930,7 @@ async function handleUpdate(update, io) {
       const run = activeQuizRuns.get(String(chatId));
       const activeQuiz = await db.getActiveTelegramQuiz(chatId);
       if (!run && !activeQuiz) {
-        await reply(chatId, "अभी कोई active Quiz नहीं है।", mainKeyboard);
-        return;
+        await reply(chatId, "अभी कोई active Quiz नहीं है।", mainKeyboard);        return;
       }
       if (run) {
         await finishQuizRun(chatId, room, run, true);
